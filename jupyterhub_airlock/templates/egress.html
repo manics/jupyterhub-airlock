@@ -1,0 +1,17 @@
+{% extends "page.html" %}
+
+{% block site %}
+
+<h1>Egress {{egress["id"]}}: {{egress["status"]}}</h1>
+
+<a href="{{reverse_url('home')}}">Home</a>
+
+<h2>{{len(egress["files"])}} files</h2>
+<table class="egress-file-list">
+  <tr><th>file path</th><th>SHA256</th></tr>
+{% for file in egress["files"] %}
+  <tr><td>{{file["path"]}}</td><td>{{file["sha256sum"]}}</td></tr>
+{% end %}
+</table>
+
+{% end %}

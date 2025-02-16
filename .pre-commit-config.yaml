@@ -14,10 +14,15 @@ repos:
     hooks:
       - id: mypy
         files: ^jupyterhub_airlock
-        args: ["--strict"]
+        args:
+          - --strict
+          - --ignore-missing-imports
+        additional_dependencies:
+          # - jupyterhub
+          - tornado
 
   - repo: https://github.com/rbubley/mirrors-prettier
     rev: v3.4.2
     hooks:
       - id: prettier
-        exclude: jupyterhub_egress/templates/
+        exclude: jupyterhub_airlock/templates/|tests/resources/egress-123

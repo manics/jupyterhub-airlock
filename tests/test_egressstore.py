@@ -34,8 +34,7 @@ def test_new_egress_invalid(tmp_path):
     assert exc_info.value.args[0] == "Invalid egress id -123"
 
 
-def test_egressstore_new(tmp_path):
-    egress_id = "egress-1"
+def test_egressstore_new(tmp_path, egress_id):
     store = EgressStore(tmp_path)
     assert store.list() == []
 
@@ -53,8 +52,7 @@ def test_egressstore_new(tmp_path):
         assert json.load(f) == {"id": egress_id, "status": "new", "files": []}
 
 
-def test_egressstatus_transitions(tmp_path):
-    egress_id = "egress-1"
+def test_egressstatus_transitions(tmp_path, egress_id):
     store = EgressStore(tmp_path)
     e = store.new_egress(egress_id)
 
@@ -71,8 +69,7 @@ def test_egressstatus_transitions(tmp_path):
     )
 
 
-def test_egressstore_add_files(tmp_path):
-    egress_id = "egress-1"
+def test_egressstore_add_files(tmp_path, egress_id):
     store = EgressStore(tmp_path)
     e = store.new_egress(egress_id)
     assert e.path == tmp_path / egress_id

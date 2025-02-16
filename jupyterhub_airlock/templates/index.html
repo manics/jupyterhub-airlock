@@ -1,0 +1,20 @@
+{% extends "page.html" %}
+
+{% block site %}
+
+<h1>JupyterHub Airlock</h1>
+
+<dl>
+  <dt>User</dt>
+  <dd>{{username}}</dd>
+  <dt>Groups</dt>
+  <dd>{{groups}}</dd>
+</dl>
+
+<ul>
+{% for item in egress_list %}
+<li><a href="egress/{{item}}">{{item}}</a></li>
+{% end %}
+</ul>
+
+{% end %}
