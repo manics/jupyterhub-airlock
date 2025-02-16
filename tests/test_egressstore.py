@@ -3,19 +3,23 @@ from jupyterhub_airlock.egress import (
     Egress,
     EgressStatus,
     is_valid_egress_id,
+    is_valid_egress_component,
 )
 import json
 import pytest
+from conftest import random_egress_id
 
 
 @pytest.mark.parametrize(
     "id,valid",
     [
-        ("egress-1", True),
-        ("123", True),
-        ("a1", True),
+        ("user/egress-1", True),
+        ("u1/123", True),
+        ("a-1/a1", True),
         ("-123", False),
-        ("abc 123", False),
+        ("u1/-123", False),
+        ("aa/abc 123", False),
+        ("a/bc123", False),
     ],
 )
 @pytest.mark.parametrize("raise_invalid", [True, False])
@@ -28,6 +32,25 @@ def test_is_valid_egress_id(id, valid, raise_invalid):
         assert is_valid_egress_id(id, raise_invalid) == valid
 
 
+@pytest.mark.parametrize(
+    "id,valid",
+    [
+        ("ab", True),
+        ("a-b", True),
+        ("a", False),
+        ("ab/cd", False),
+    ],
+)
+@pytest.mark.parametrize("raise_invalid", [True, False])
+def test_is_valid_egress_component(id, valid, raise_invalid):
+    if not valid and raise_invalid:
+        with pytest.raises(ValueError) as exc_info:
+            is_valid_egress_component(id)
+        assert exc_info.value.args[0] == f"Invalid egress component {id}"
+    else:
+        assert is_valid_egress_component(id, raise_invalid) == valid
+
+
 def test_new_egress_invalid(tmp_path):
     with pytest.raises(ValueError) as exc_info:
         Egress("-123", tmp_path)
@@ -35,14 +58,17 @@ def test_new_egress_invalid(tmp_path):
 
 
 def test_egressstore_new(tmp_path, egress_id):
-    store = EgressStore(tmp_path)
-    assert store.list() == []
+    u_id, e_id = egress_id.split("/")
 
-    e = store.new_egress(egress_id)
-    assert store.list() == [egress_id]
-    assert e.id == egress_id
-    assert e.path == tmp_path / egress_id
+    store = EgressStore(tmp_path)
+    assert store.list("*") == []
+
+    egress = store.new_egress(egress_id)
+    assert store.list("*") == [egress_id]
+    assert egress.id == egress_id
+    assert egress.path == tmp_path / u_id / e_id
     assert sorted(str(p.relative_to(tmp_path)) for p in tmp_path.rglob("*")) == [
+        u_id,
         egress_id,
         f"{egress_id}/files",
         f"{egress_id}/metadata.json",
@@ -50,6 +76,29 @@ def test_egressstore_new(tmp_path, egress_id):
 
     with open(str(tmp_path / egress_id / "metadata.json")) as f:
         assert json.load(f) == {"id": egress_id, "status": "new", "files": []}
+
+
+def test_egressstore_list(tmp_path):
+    store = EgressStore(tmp_path)
+    assert store.list("*") == []
+
+    u1 = random_egress_id().split("/")[0]
+    u1e1 = random_egress_id().split("/")[1]
+    u1e2 = random_egress_id().split("/")[1]
+
+    u2 = random_egress_id().split("/")[0]
+    u2e1 = random_egress_id().split("/")[1]
+
+    u3 = random_egress_id().split("/")[0]
+
+    for u, e in [(u1, u1e1), (u1, u1e2), (u2, u2e1)]:
+        egress = store.new_egress(f"{u}/{e}")
+        assert egress.metadata() == {"id": f"{u}/{e}", "status": "new", "files": []}
+
+    assert store.list("*") == sorted([f"{u1}/{u1e1}", f"{u1}/{u1e2}", f"{u2}/{u2e1}"])
+    assert store.list(u1) == sorted([f"{u1}/{u1e1}", f"{u1}/{u1e2}"])
+    assert store.list(u2) == sorted([f"{u2}/{u2e1}"])
+    assert store.list(u3) == []
 
 
 def test_egressstatus_transitions(tmp_path, egress_id):
@@ -70,17 +119,20 @@ def test_egressstatus_transitions(tmp_path, egress_id):
 
 
 def test_egressstore_add_files(tmp_path, egress_id):
+    u_id, e_id = egress_id.split("/")
+
     store = EgressStore(tmp_path)
-    e = store.new_egress(egress_id)
-    assert e.path == tmp_path / egress_id
+    egress = store.new_egress(egress_id)
+    assert egress.path == tmp_path / u_id / e_id
 
-    (e.path / "files" / "hello.txt").write_text("hello")
-    (e.path / "files" / '{"}').mkdir()
-    (e.path / "files" / '{"}' / "world.txt").write_text("world")
+    (egress.path / "files" / "hello.txt").write_text("hello")
+    (egress.path / "files" / '{"}').mkdir()
+    (egress.path / "files" / '{"}' / "world.txt").write_text("world")
 
-    e.add_files()
+    egress.add_files()
 
     assert sorted(str(p.relative_to(tmp_path)) for p in tmp_path.rglob("*")) == [
+        u_id,
         egress_id,
         f"{egress_id}/files",
         f"{egress_id}/files/hello.txt",
@@ -106,7 +158,7 @@ def test_egressstore_add_files(tmp_path, egress_id):
         }
 
         with pytest.raises(ValueError) as exc_info:
-            e.add_files()
+            egress.add_files()
         assert (
             exc_info.value.args[0]
             == "Can only add files to status new, current status pending"

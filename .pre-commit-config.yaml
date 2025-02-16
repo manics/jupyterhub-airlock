@@ -25,4 +25,4 @@ repos:
     rev: v3.4.2
     hooks:
       - id: prettier
-        exclude: jupyterhub_airlock/templates/|tests/resources/egress-123
+        exclude: jupyterhub_airlock/templates/|tests/resources/
