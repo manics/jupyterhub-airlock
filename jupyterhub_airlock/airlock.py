@@ -44,6 +44,7 @@ class AirlockHandler(HubOAuthenticated, RequestHandler):  # type: ignore[misc]
         self.store: EgressStore = kwargs.pop("store")
         if not self.store:
             raise ValueError("store required")
+        self.admin_group = kwargs.pop("admin_group")
         super().initialize(**kwargs)
 
     def get_template_path(self) -> str:
@@ -67,10 +68,15 @@ class AirlockHandler(HubOAuthenticated, RequestHandler):  # type: ignore[misc]
 
         username = current_user_model["name"]
         groups = current_user_model["groups"]
+        is_admin = self.admin_group in groups
 
-        egress_list = self.store.list()
+        egress_list = self.store.list("*" if is_admin else username)
         self.render(
-            "index.html", username=username, groups=groups, egress_list=egress_list
+            "index.html",
+            username=username,
+            groups=groups,
+            egress_list=egress_list,
+            is_admin=is_admin,
         )
 
         # self.set_header("content-type", "application/json")
@@ -96,10 +102,21 @@ class AirlockHandler(HubOAuthenticated, RequestHandler):  # type: ignore[misc]
 
 class AirlockEgressHandler(AirlockHandler):
     @authenticated
-    async def get(self, egress_id: str) -> None:
-        egress = self.store.get_egress(egress_id)
-        m = egress.metadata()
-        self.render("egress.html", egress=m)
+    async def get(self, user: str, egress: str) -> None:
+        current_user_model = self.get_current_user()
+        log.debug(f"{current_user_model=}")
+        if not current_user_model:
+            raise HTTPError(403, reason="Missing user")
+        username = current_user_model["name"]
+        groups = current_user_model["groups"]
+
+        if self.admin_group in groups or username == user:
+            egress_id = f"{user}/{egress}"
+            e = self.store.get_egress(egress_id)
+            m = e.metadata()
+            self.render("egress.html", egress=m)
+        else:
+            raise HTTPError(404, reason="Egress not found")
 
 
 class HealthHandler(RequestHandler):
@@ -108,9 +125,10 @@ class HealthHandler(RequestHandler):
         self.write(json.dumps({"status": "ok"}, indent=2, sort_keys=True))
 
 
-def main(filestore: str, debug: bool = False) -> None:
-    airlockArgs = {}
+def main(filestore: str, admin_group: str, debug: bool) -> None:
+    airlockArgs: dict[str, Any] = {}
     airlockArgs["store"] = EgressStore(Path(filestore))
+    airlockArgs["admin_group"] = admin_group
 
     JUPYTERHUB_SERVICE_PREFIX = os.getenv("JUPYTERHUB_SERVICE_PREFIX", "/")
     if not JUPYTERHUB_SERVICE_PREFIX.endswith("/"):
@@ -129,7 +147,11 @@ def main(filestore: str, debug: bool = False) -> None:
             rule("/oauth_callback", HubOAuthCallbackHandler),
             rule("/health/?", HealthHandler),
             # TODO: Enforce naming restrictions on user and server names in JupyterHub
-            rule(r"/egress/(?P<egress_id>[^/]+)", AirlockEgressHandler, airlockArgs),
+            rule(
+                r"/egress/(?P<user>[^/]+)/(?P<egress>[^/]+)",
+                AirlockEgressHandler,
+                airlockArgs,
+            ),
         ],
         static_url_prefix=url_path_join(JUPYTERHUB_SERVICE_PREFIX, "static/"),
         cookie_secret=os.urandom(32),
@@ -159,6 +181,9 @@ if __name__ == "__main__":
     parser.add_argument("--log-level", default="INFO", help="Log level")
     parser.add_argument("--debug", action="store_true", help=SUPPRESS)
     parser.add_argument("--filestore", required=True, help="Egress filestore directory")
+    parser.add_argument(
+        "--admin-group", default="egress-admins", help="Egress admin group"
+    )
     args = parser.parse_args()
 
     log_level = "DEBUG" if args.debug else args.log_level.upper()
@@ -170,4 +195,4 @@ if __name__ == "__main__":
         )
     )
     log.addHandler(h)
-    main(args.filestore, args.debug)
+    main(args.filestore, args.admin_group, args.debug)

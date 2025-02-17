@@ -8,6 +8,9 @@ from jupyterhub_airlock.egress import (
 import json
 import pytest
 from conftest import random_egress_id
+from pathlib import Path
+
+HERE = Path(__file__).parent
 
 
 @pytest.mark.parametrize(
@@ -163,3 +166,19 @@ def test_egressstore_add_files(tmp_path, egress_id):
             exc_info.value.args[0]
             == "Can only add files to status new, current status pending"
         )
+
+
+def test_unicode_files():
+    store = EgressStore(HERE / "resources")
+    assert store.list("*") == ["user-1/egress-123", "user-2/abc"]
+    e = store.get_egress("user-2/abc")
+    assert e.metadata() == {
+        "id": "user-2/abc",
+        "status": "pending",
+        "files": [
+            {
+                "path": "birds 🐧🐔🦆.txt",
+                "sha256sum": "620e834dad842f4baeb891b38f1db82b9c1c84401d2ba33f5a8036a856dc9719",
+            }
+        ],
+    }
