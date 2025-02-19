@@ -13,8 +13,23 @@
   <dd>{{is_admin}}</dd>
 </dl>
 
+<h2>Pending</h2>
 <ul>
-{% for item in egress_list %}
+{% for item in pending_list %}
+<li><a href="egress/{{item}}">{{item}}</a></li>
+{% end %}
+</ul>
+
+<h2>Accepted</h2>
+<ul>
+{% for item in accepted_list %}
+<li><a href="egress/{{item}}">{{item}}</a></li>
+{% end %}
+</ul>
+
+<h2>Rejected</h2>
+<ul>
+{% for item in rejected_list %}
 <li><a href="egress/{{item}}">{{item}}</a></li>
 {% end %}
 </ul>

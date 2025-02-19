@@ -1,7 +1,7 @@
 from enum import Enum
 import hashlib
 from pathlib import Path
-from typing import Any, Dict, List, TypeAlias
+from typing import Any, Dict, TypeAlias
 import json
 import re
 
@@ -137,20 +137,39 @@ class Egress:
         self.set_status(EgressStatus.PENDING)
 
 
+EgressList: TypeAlias = Dict[EgressStatus, Dict[str, Egress]]
+
+
 class EgressStore:
     def __init__(self, filestore: Path):
         self.filestore: Path = filestore
 
-    def list(self, user: str) -> List[str]:
+    def _list_filestore(self, user: str) -> EgressList:
+        """
+        Get all egress in a filestore, optionally filtered by user
+
+        TODO: Need a database, loading all egress metadata files repeatedly
+        on basically every request is obviously inefficient
+        """
+        egresses: EgressList = {}
+        for f in self.filestore.glob(f"{user}/*/"):
+            id = str(f.relative_to(self.filestore))
+            if is_valid_egress_id(id):
+                egress = Egress(id, f)
+                status = egress.status()
+            try:
+                egresses[status][id] = egress
+            except KeyError:
+                egresses[status] = {id: egress}
+        return egresses
+
+    def list(self, user: str) -> EgressList:
         """
         List all egresses
         """
         if user != "*":
             is_valid_egress_component(user)
-        dirs = [
-            f.relative_to(self.filestore) for f in self.filestore.glob(f"{user}/*/")
-        ]
-        return sorted(str(d) for d in dirs if is_valid_egress_id(str(d)))
+        return self._list_filestore(user)
 
     def get_egress(self, egress_id: str) -> Egress:
         """

@@ -14,4 +14,13 @@
 {% end %}
 </table>
 
+{% if is_reviewer %}
+<h2>What do you want to do?</h2>
+<form method="post">
+<button type="submit" name="accept" value="accept">accept ✅</button>
+<button type="submit" name="accept" value="reject">reject ❌</button>
+<input type="hidden" name="_xsrf" value="{{xsrf_token}}"/>
+</form>
+{% end %}
+
 {% end %}

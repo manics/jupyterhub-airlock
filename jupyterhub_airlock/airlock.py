@@ -23,7 +23,7 @@ from jupyterhub.services.auth import HubOAuthCallbackHandler
 from jupyterhub.services.auth import HubOAuthenticated
 from jupyterhub.utils import url_path_join
 
-from .egress import EgressStore
+from .egress import EgressStore, EgressStatus, Egress
 
 
 import logging
@@ -45,10 +45,32 @@ class AirlockHandler(HubOAuthenticated, RequestHandler):  # type: ignore[misc]
         if not self.store:
             raise ValueError("store required")
         self.admin_group = kwargs.pop("admin_group")
+        if not self.admin_group:
+            raise ValueError("admin_group required")
         super().initialize(**kwargs)
 
     def get_template_path(self) -> str:
         return os.path.join(os.path.dirname(__file__), "templates")
+
+    def is_admin(self) -> bool:
+        user = self.get_current_user()["name"]
+        groups = self.get_current_user()["groups"]
+        admin = self.admin_group in groups
+        log.debug(f"is_admin {user} {groups}: {admin}")
+        return admin
+
+    def is_viewer(self, egress: Egress) -> bool:
+        user = self.get_current_user()["name"]
+        u, _ = egress.id.split("/")
+        viewer = self.is_admin() or (user == u)
+        log.debug(f"is_viewer {user} {egress.id}: {viewer}")
+        return viewer
+
+    def is_reviewer(self, egress: Egress) -> bool:
+        user = self.get_current_user()["name"]
+        reviewer = self.is_admin() and egress.status() == EgressStatus.PENDING
+        log.debug(f"is_reviewer {user} {egress.id}: {reviewer}")
+        return reviewer
 
     @authenticated
     async def get(self) -> None:
@@ -75,7 +97,9 @@ class AirlockHandler(HubOAuthenticated, RequestHandler):  # type: ignore[misc]
             "index.html",
             username=username,
             groups=groups,
-            egress_list=egress_list,
+            pending_list=egress_list.get(EgressStatus.PENDING, []),
+            accepted_list=egress_list.get(EgressStatus.ACCEPTED, []),
+            rejected_list=egress_list.get(EgressStatus.REJECTED, []),
             is_admin=is_admin,
         )
 
@@ -101,22 +125,63 @@ class AirlockHandler(HubOAuthenticated, RequestHandler):  # type: ignore[misc]
 
 
 class AirlockEgressHandler(AirlockHandler):
-    @authenticated
-    async def get(self, user: str, egress: str) -> None:
+    async def _egress_info(self, user: str, egress: str) -> None:
         current_user_model = self.get_current_user()
         log.debug(f"{current_user_model=}")
         if not current_user_model:
             raise HTTPError(403, reason="Missing user")
         username = current_user_model["name"]
-        groups = current_user_model["groups"]
+        egress_id = f"{user}/{egress}"
 
-        if self.admin_group in groups or username == user:
-            egress_id = f"{user}/{egress}"
-            e = self.store.get_egress(egress_id)
-            m = e.metadata()
-            self.render("egress.html", egress=m)
+        try:
+            egress_item = self.store.get_egress(egress_id)
+        except ValueError as e:
+            # Some browser plugins make random requests like for installHook.js.map
+            # So handle gracefully instead of filling up our logs with exceptions
+            log.error(str(e))
+            raise HTTPError(404, reason="Egress not found")
+
+        is_reviewer = self.is_reviewer(egress_item)
+        if self.is_admin() or username == user or is_reviewer:
+            self.render(
+                "egress.html",
+                egress=egress_item.metadata(),
+                is_reviewer=is_reviewer,
+                xsrf_token=self.xsrf_token.decode("ascii"),
+            )
         else:
             raise HTTPError(404, reason="Egress not found")
+
+    @authenticated
+    async def get(self, user: str, egress: str) -> None:
+        await self._egress_info(user, egress)
+
+    @authenticated
+    async def post(self, user: str, egress: str) -> None:
+        current_user_model = self.get_current_user()
+        log.debug(f"{current_user_model=}")
+        if not current_user_model:
+            raise HTTPError(403, reason="Missing user")
+
+        egress_id = f"{user}/{egress}"
+        egress_item = self.store.get_egress(egress_id)
+        is_reviewer = self.is_reviewer(egress_item)
+
+        if not is_reviewer:
+            raise HTTPError(404, reason="Egress not found")
+
+        log.debug(f"{self.request.arguments=}")
+
+        accept = self.request.arguments.get("accept")
+        if accept == [b"accept"]:
+            egress_item.set_status(EgressStatus.ACCEPTED)
+        elif accept == [b"reject"]:
+            egress_item.set_status(EgressStatus.REJECTED)
+        else:
+            log.error(f"Invalid accept value: {accept}")
+            raise HTTPError(422, "Invalid accept action")
+
+        await self._egress_info(user, egress)
 
 
 class HealthHandler(RequestHandler):
