@@ -6,6 +6,7 @@ from jupyterhub_airlock.egress import (
     is_valid_egress_component,
 )
 import json
+from shutil import copytree
 import pytest
 from conftest import random_egress_id
 from pathlib import Path
@@ -60,16 +61,41 @@ def test_new_egress_invalid(tmp_path):
     assert exc_info.value.args[0] == "Invalid egress id -123"
 
 
+def test_new_egress_already_exists(tmp_path):
+    Egress("abc/123", tmp_path / "abc/123", create=True)
+
+    with pytest.raises(ValueError) as exc_info:
+        Egress("abc/123", tmp_path / "abc/123", create=True)
+    assert exc_info.value.args[0] == "Egress abc/123 already exists"
+
+
+def test_egress_eq(tmp_path):
+    e = Egress("abc/123", tmp_path / "abc/123", create=True)
+    assert e == Egress("abc/123", tmp_path / "abc/123")
+    assert e != Egress("abc/124", tmp_path / "abc/124")
+
+
+def test_egress_check_path_absolute():
+    with pytest.raises(ValueError) as exc_info:
+        Egress("abc/123", Path("abc/123"))
+    assert exc_info.value.args[0] == "Path abc/123 must be absolute"
+
+
+def test_egressstore_path_absolute():
+    store = EgressStore(Path("."))
+    assert store.filestore == Path(".").absolute()
+
+
 def test_egressstore_new(tmp_path, egress_id):
     u_id, e_id = egress_id.split("/")
 
     store = EgressStore(tmp_path)
-    assert store.list("*") == []
+    assert store.list("*") == {}
 
     egress = store.new_egress(egress_id)
-    assert store.list("*") == [egress_id]
     assert egress.id == egress_id
     assert egress.path == tmp_path / u_id / e_id
+    assert store.list("*") == {EgressStatus.NEW: {egress_id: egress}}
     assert sorted(str(p.relative_to(tmp_path)) for p in tmp_path.rglob("*")) == [
         u_id,
         egress_id,
@@ -83,7 +109,7 @@ def test_egressstore_new(tmp_path, egress_id):
 
 def test_egressstore_list(tmp_path):
     store = EgressStore(tmp_path)
-    assert store.list("*") == []
+    assert store.list("*") == {}
 
     u1 = random_egress_id().split("/")[0]
     u1e1 = random_egress_id().split("/")[1]
@@ -98,10 +124,35 @@ def test_egressstore_list(tmp_path):
         egress = store.new_egress(f"{u}/{e}")
         assert egress.metadata() == {"id": f"{u}/{e}", "status": "new", "files": []}
 
-    assert store.list("*") == sorted([f"{u1}/{u1e1}", f"{u1}/{u1e2}", f"{u2}/{u2e1}"])
-    assert store.list(u1) == sorted([f"{u1}/{u1e1}", f"{u1}/{u1e2}"])
-    assert store.list(u2) == sorted([f"{u2}/{u2e1}"])
-    assert store.list(u3) == []
+    def mock_egress_kv(ue):
+        return {ue: Egress(ue, tmp_path / ue)}
+
+    all_egress_dict = (
+        mock_egress_kv(f"{u1}/{u1e1}")
+        | mock_egress_kv(f"{u1}/{u1e2}")
+        | mock_egress_kv(f"{u2}/{u2e1}")
+    )
+
+    assert store.list("*") == {EgressStatus.NEW: all_egress_dict}
+    assert store.list(u1) == {
+        EgressStatus.NEW: (
+            mock_egress_kv(f"{u1}/{u1e1}") | mock_egress_kv(f"{u1}/{u1e2}")
+        )
+    }
+    assert store.list(u2) == {EgressStatus.NEW: mock_egress_kv(f"{u2}/{u2e1}")}
+    assert store.list(u3) == {}
+
+    all_egress_dict[f"{u1}/{u1e1}"].set_status(EgressStatus.PENDING)
+    all_egress_dict[f"{u1}/{u1e2}"].set_status(EgressStatus.PENDING)
+    all_egress_dict[f"{u1}/{u1e2}"].set_status(EgressStatus.ACCEPTED)
+    all_egress_dict[f"{u2}/{u2e1}"].set_status(EgressStatus.PENDING)
+    all_egress_dict[f"{u2}/{u2e1}"].set_status(EgressStatus.REJECTED)
+
+    assert store.list("*") == {
+        EgressStatus.PENDING: mock_egress_kv(f"{u1}/{u1e1}"),
+        EgressStatus.ACCEPTED: mock_egress_kv(f"{u1}/{u1e2}"),
+        EgressStatus.REJECTED: mock_egress_kv(f"{u2}/{u2e1}"),
+    }
 
 
 def test_egressstatus_transitions(tmp_path, egress_id):
@@ -168,9 +219,19 @@ def test_egressstore_add_files(tmp_path, egress_id):
         )
 
 
-def test_unicode_files():
-    store = EgressStore(HERE / "resources")
-    assert store.list("*") == ["user-1/egress-123", "user-2/abc"]
+def test_unicode_files(tmp_path):
+    copytree(HERE / "resources", tmp_path / "test")
+
+    def mock_egress_kv(ue):
+        return {ue: Egress(ue, tmp_path / "test" / ue)}
+
+    store = EgressStore(tmp_path / "test")
+    print(store.list("*"))
+    assert store.list("*") == {
+        EgressStatus.PENDING: (
+            mock_egress_kv("user-1/egress-123") | mock_egress_kv("user-2/abc")
+        )
+    }
     e = store.get_egress("user-2/abc")
     assert e.metadata() == {
         "id": "user-2/abc",

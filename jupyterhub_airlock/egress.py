@@ -55,10 +55,10 @@ def is_valid_egress_component(id: str, raise_invalid: bool = True) -> bool:
 
 
 class Egress:
-    _egress_status_values = set(e.value for e in EgressStatus)
-
     def __init__(self, id: str, path: Path, create: bool = False):
         is_valid_egress_id(id)
+        if not path.is_absolute():
+            raise ValueError(f"Path {path} must be absolute")
         self.id = id
         self.path = path
         if create:
@@ -69,6 +69,17 @@ class Egress:
                 {"id": id, "status": EgressStatus.NEW.value, "files": []},
                 create=True,
             )
+
+    def __eq__(self, other: Any) -> bool:
+        if not isinstance(other, Egress):
+            return NotImplemented
+        return self.id == other.id and self.path == other.path
+
+    def __hash__(self) -> int:
+        return hash((self.__class__.__name__, self.id, self.path))
+
+    def __repr__(self) -> str:
+        return f"{self.__class__.__name__}({self.id!r},{self.path!r})"
 
     def metadata(self) -> JsonT:
         """
