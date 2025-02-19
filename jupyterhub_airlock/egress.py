@@ -136,13 +136,31 @@ class Egress:
         self.update_metadata({"files": files})
         self.set_status(EgressStatus.PENDING)
 
+    def files_for_egress(self) -> Dict[str, str]:
+        """
+        Return a map of {absolute_file_path : egress_file_path}
+        for constructing downloadable outputs
+        Includes the root metadata.json
+        """
+        status = self.status()
+        if status != EgressStatus.ACCEPTED:
+            raise ValueError(
+                f"Egress must be {EgressStatus.ACCEPTED}, current status {status}"
+            )
+        file_path_map = {str(self.path / "metadata.json"): "metadata.json"}
+        for file in self.metadata()["files"]:
+            file_path_map[str(self.path / EGRESS_FILE_DIR / file["path"])] = (
+                f"{EGRESS_FILE_DIR}/{file['path']}"
+            )
+        return file_path_map
+
 
 EgressList: TypeAlias = Dict[EgressStatus, Dict[str, Egress]]
 
 
 class EgressStore:
     def __init__(self, filestore: Path):
-        self.filestore: Path = filestore
+        self.filestore: Path = filestore.absolute()
 
     def _list_filestore(self, user: str) -> EgressList:
         """

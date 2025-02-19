@@ -4,6 +4,7 @@ https://github.com/jupyterhub/jupyterhub/blob/5.0.0/examples/service-whoami/whoa
 """
 
 from argparse import ArgumentParser, SUPPRESS
+import asyncio
 import json
 import os
 from urllib.parse import urlparse
@@ -16,7 +17,9 @@ from tornado.web import Application
 from tornado.web import RequestHandler
 from tornado.web import HTTPError
 from tornado.web import authenticated
+from tornado.web import addslash
 from tornado.web import url
+from tornado.iostream import StreamClosedError
 
 
 from jupyterhub.services.auth import HubOAuthCallbackHandler
@@ -24,6 +27,7 @@ from jupyterhub.services.auth import HubOAuthenticated
 from jupyterhub.utils import url_path_join
 
 from .egress import EgressStore, EgressStatus, Egress
+from .download import create_egress_zipfile
 
 
 import logging
@@ -71,6 +75,15 @@ class AirlockHandler(HubOAuthenticated, RequestHandler):  # type: ignore[misc]
         reviewer = self.is_admin() and egress.status() == EgressStatus.PENDING
         log.debug(f"is_reviewer {user} {egress.id}: {reviewer}")
         return reviewer
+
+    def is_downloader(self, egress: Egress) -> bool:
+        user = self.get_current_user()["name"]
+        u, _ = egress.id.split("/")
+        downloader = (
+            self.is_admin() or (user == u)
+        ) and egress.status() == EgressStatus.ACCEPTED
+        log.debug(f"is_downloader {user} {egress.id}: {downloader}")
+        return downloader
 
     @authenticated
     async def get(self) -> None:
@@ -142,16 +155,19 @@ class AirlockEgressHandler(AirlockHandler):
             raise HTTPError(404, reason="Egress not found")
 
         is_reviewer = self.is_reviewer(egress_item)
+        is_downloader = self.is_downloader(egress_item)
         if self.is_admin() or username == user or is_reviewer:
             self.render(
                 "egress.html",
                 egress=egress_item.metadata(),
                 is_reviewer=is_reviewer,
+                is_downloader=is_downloader,
                 xsrf_token=self.xsrf_token.decode("ascii"),
             )
         else:
             raise HTTPError(404, reason="Egress not found")
 
+    @addslash
     @authenticated
     async def get(self, user: str, egress: str) -> None:
         await self._egress_info(user, egress)
@@ -184,6 +200,57 @@ class AirlockEgressHandler(AirlockHandler):
         await self._egress_info(user, egress)
 
 
+class AirlockDownloadHandler(AirlockHandler):
+    async def _download(self, filepath: Path) -> None:
+        # https://bhch.github.io/posts/2017/12/serving-large-files-with-tornado-safely-without-blocking/
+        chunk_size = 1024 * 1024
+        self.set_header("Content-Type", "application/force-download")
+        self.set_header("Content-Disposition", f"attachment; filename={filepath.name}")
+
+        with filepath.open("rb") as f:
+            while True:
+                chunk = f.read(chunk_size)
+                if not chunk:
+                    break
+                try:
+                    self.write(chunk)
+                    await self.flush()
+                except StreamClosedError:
+                    # client has closed the connection
+                    break
+                finally:
+                    # delete chunk to free up memory
+                    del chunk
+                    # pause coroutine so other handlers can run
+                    await asyncio.sleep(0.001)
+
+    @authenticated
+    async def post(self, user: str, egress: str) -> None:
+        current_user_model = self.get_current_user()
+        log.debug(f"{current_user_model=}")
+        if not current_user_model:
+            raise HTTPError(403, reason="Missing user")
+
+        egress_id = f"{user}/{egress}"
+        egress_item = self.store.get_egress(egress_id)
+        is_downloader = self.is_downloader(egress_item)
+
+        if not is_downloader:
+            raise HTTPError(404, reason="Egress not found")
+
+        log.debug(f"{self.request.arguments=}")
+
+        download = self.request.arguments.get("download")
+        if download != [b"download"]:
+            log.error(f"Invalid download value: {download}")
+            raise HTTPError(422, "Invalid download action")
+
+        filepath = await create_egress_zipfile(egress_item)
+        log.info(f"Downloading {filepath}")
+        await self._download(filepath)
+        log.debug(f"Download complete {filepath}")
+
+
 class HealthHandler(RequestHandler):
     async def get(self) -> None:
         self.set_header("content-type", "application/json")
@@ -213,8 +280,13 @@ def main(filestore: str, admin_group: str, debug: bool) -> None:
             rule("/health/?", HealthHandler),
             # TODO: Enforce naming restrictions on user and server names in JupyterHub
             rule(
-                r"/egress/(?P<user>[^/]+)/(?P<egress>[^/]+)",
+                r"/egress/(?P<user>[^/]+)/(?P<egress>[^/]+)/?",
                 AirlockEgressHandler,
+                airlockArgs,
+            ),
+            rule(
+                r"/egress/(?P<user>[^/]+)/(?P<egress>[^/]+)/download",
+                AirlockDownloadHandler,
                 airlockArgs,
             ),
         ],

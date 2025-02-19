@@ -23,4 +23,13 @@
 </form>
 {% end %}
 
+
+{% if is_downloader %}
+<h2>Download</h2>
+<form method="post" action="download">
+<button type="submit" name="download" value="download">Download 📥</button>
+<input type="hidden" name="_xsrf" value="{{xsrf_token}}"/>
+</form>
+{% end %}
+
 {% end %}
