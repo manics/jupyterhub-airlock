@@ -7,4 +7,9 @@ dt {
 }
 table.egress-file-list tr td {
   font-family: monospace;
+  padding: 0 1vw;
+}
+table.egress-file-list tr th {
+  padding: 0 1vw;
+  text-align: left;
 }

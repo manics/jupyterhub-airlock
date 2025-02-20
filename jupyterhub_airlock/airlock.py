@@ -28,9 +28,9 @@ from jupyterhub.services.auth import HubOAuthCallbackHandler
 from jupyterhub.services.auth import HubOAuthenticated
 from jupyterhub.utils import url_path_join
 
-from .egress import EgressStore, EgressStatus, Egress
+from .egress import EgressStore, EgressStatus, Egress, EGRESS_FILE_DIR
 from .filesystemio import create_egress_zipfile, delete_egress_zipfile
-from .filesystemio import copyfiles, filelist_and_size_recursive
+from .filesystemio import copyfiles, filelist_and_size_recursive, unescape_filepath
 
 
 import logging
@@ -39,6 +39,7 @@ from http.client import responses
 log = logging.getLogger("jupyterhub_airlock")
 
 MAX_DIRECTORY_SIZE_MB = 100
+USER_EGRESS_DIR = "egress"
 
 # JUPYTERHUB_API_TOKEN = os.environ["JUPYTERHUB_API_TOKEN"]
 
@@ -56,6 +57,7 @@ class HomeNoSlashHandler(RequestHandler):
 
 class AirlockHandler(HubOAuthenticated, RequestHandler):  # type: ignore[misc]
     def initialize(self, **kwargs: Any) -> None:
+        self.baseurl: str = kwargs.pop("baseurl")
         self.store: EgressStore = kwargs.pop("store")
         self.user_store: Path = kwargs.pop("user_store")
         if not self.store:
@@ -77,6 +79,7 @@ class AirlockHandler(HubOAuthenticated, RequestHandler):  # type: ignore[misc]
 
     def is_viewer(self, egress: Egress) -> bool:
         user = self.get_current_user()["name"]
+        # TODO: Get user from metadata.json, not filepath
         u, _ = egress.id.split("/")
         viewer = self.is_admin() or (user == u)
         log.debug(f"is_viewer {user} {egress.id}: {viewer}")
@@ -120,6 +123,7 @@ class AirlockHandler(HubOAuthenticated, RequestHandler):  # type: ignore[misc]
         egress_list = self.store.list("*" if is_admin else username)
         self.render(
             "index.html",
+            baseurl=self.baseurl,
             username=username,
             groups=groups,
             pending_list=egress_list.get(EgressStatus.PENDING, []),
@@ -149,68 +153,90 @@ class AirlockHandler(HubOAuthenticated, RequestHandler):  # type: ignore[misc]
         )
 
 
+# TODO: Break this into separate API/backend and frontend code
 class AirlockSubmissionHandler(AirlockHandler):
+    async def _list_egress_files(
+        self, user: str
+    ) -> tuple[dict[Path, tuple[str, int]], int, Path]:
+        user_egress_path = self.user_store / user / USER_EGRESS_DIR
+        log.debug(f"Listing files in: {user_egress_path}")
+        filelist, total_size = await filelist_and_size_recursive(user_egress_path)
+        return filelist, total_size, user_egress_path
+
     @addslash
     @authenticated
-    async def get(self, user: str) -> None:
-        filelist, total_size = await filelist_and_size_recursive(self.user_store)
-        total_size_mb = total_size / 1024 / 1024
-        if total_size_mb > MAX_DIRECTORY_SIZE_MB:
-            raise ValueError(
-                "Directory size {total_size_mb} MB exceeds maximum {MAX_DIRECTORY_SIZE_MB} MB"
-            )
-
-        self.render(
-            "new.html",
-            filelist=filelist,
-            xsrf_token=self.xsrf_token.decode("ascii"),
-        )
-
-        raise NotImplementedError()
-        # List files in user's egress directory
-        # If submit clicked then POST:
-        # - create a new egress, status NEW
-        # - Copy files from user's egress dir to the new egress files dir
-        # - Add all files to the egress metadata
-        # - Set the egress to pending
-
-    @authenticated
-    async def post(self, user: str) -> None:
+    async def get(self) -> None:
         current_user_model = self.get_current_user()
         log.debug(f"{current_user_model=}")
         if not current_user_model:
             raise HTTPError(403, reason="Missing user")
+        username = current_user_model["name"]
+
+        filelist, total_size, _ = await self._list_egress_files(username)
+        total_size_mb = total_size / 1024 / 1024
+        if total_size_mb > MAX_DIRECTORY_SIZE_MB:
+            raise HTTPError(
+                409,
+                reason=f"Directory size {total_size_mb:.0f} MB exceeds maximum {MAX_DIRECTORY_SIZE_MB} MB",
+            )
+
+        self.render(
+            "new.html",
+            baseurl=self.baseurl,
+            filelist=filelist,
+            xsrf_token=self.xsrf_token.decode("ascii"),
+        )
+
+    @authenticated
+    async def post(self) -> None:
+        current_user_model = self.get_current_user()
+        log.debug(f"{current_user_model=}")
+        if not current_user_model:
+            raise HTTPError(403, reason="Missing user")
+        username = current_user_model["name"]
 
         log.debug(f"{self.request.arguments=}")
 
-        filelist, total_size = await filelist_and_size_recursive(self.user_store)
+        filelist, _, user_egress_path = await self._list_egress_files(username)
+        allowed_file_paths = filelist.keys()
+        log.debug(f"{allowed_file_paths=}")
 
-        # The file list from the browser should match filelist_and_size_recursive
-        # If it doesn't either the user has added/removed a file in the workspace
+        request_arg_egress = self.request.arguments.get("egress")
+        if request_arg_egress != [b"egress"]:
+            log.error(f"Unexpected value for argument egress: {request_arg_egress}")
+            raise HTTPError(400, reason="Unexpected form value")
+
+        # The requested file should match filelist_and_size_recursive
+        # If it doesn't either the user has removed a file in the workspace
         # or someone is trying to hack the system
-        request_files = self.request.arguments.get("files")
-        if not request_files:
-            raise HTTPError(422, "Expected files")
-        requested_file_paths = sorted(Path(str(f)) for f in request_files)
+        requested_files = set()
+        for arg, value in self.request.arguments.items():
+            if arg.startswith("file-"):
+                if value != [b"on"]:
+                    log.error(f"Unexpected value for argument {arg}: {value}")
+                    raise HTTPError(400, reason="Unexpected form value")
 
-        expected_file_paths = sorted(filelist.keys())
+                filepath = Path(unescape_filepath(arg[5:]))
+                if filepath not in allowed_file_paths:
+                    log.error(f"Invalid file argument: {arg} ({filepath})")
+                    raise HTTPError(409, reason="Invalid file requested")
+                else:
+                    requested_files.add(filepath)
 
-        if expected_file_paths != requested_file_paths:
-            log.error(
-                f"Submitted files {requested_file_paths} is different from expected {expected_file_paths}"
-            )
-            raise HTTPError(409, reason="The egress directory was modified!")
+        if not requested_files:
+            raise HTTPError(400, reason="No files selected")
 
-        egress_id = generate_egress_id(user)
+        egress_id = generate_egress_id(username)
         egress = self.store.new_egress(egress_id)
+        egress_dest_path = egress.path / EGRESS_FILE_DIR
 
-        await copyfiles(expected_file_paths, self.user_store, egress.path)
+        await copyfiles(requested_files, user_egress_path, egress_dest_path)
         log.debug(
-            f"Copied {expected_file_paths} from {self.user_store} to {egress.path}"
+            f"Copied {requested_files} from {user_egress_path} to {egress_dest_path}"
         )
         egress.add_files()
 
-        self.redirect(f"../{egress_id}")
+        self.redirect(f"{self.baseurl}egress/{egress_id}")
 
 
 class AirlockEgressHandler(AirlockHandler):
@@ -235,6 +261,7 @@ class AirlockEgressHandler(AirlockHandler):
         if self.is_admin() or username == user or is_reviewer:
             self.render(
                 "egress.html",
+                baseurl=self.baseurl,
                 egress=egress_item.metadata(),
                 is_reviewer=is_reviewer,
                 is_downloader=is_downloader,
@@ -335,14 +362,15 @@ class HealthHandler(RequestHandler):
 
 
 def main(filestore: str, user_store: str, admin_group: str, debug: bool) -> None:
+    JUPYTERHUB_SERVICE_PREFIX = os.getenv("JUPYTERHUB_SERVICE_PREFIX", "/")
+    if not JUPYTERHUB_SERVICE_PREFIX.endswith("/"):
+        JUPYTERHUB_SERVICE_PREFIX += "/"
+
     airlockArgs: dict[str, Any] = {}
     airlockArgs["store"] = EgressStore(Path(filestore))
     airlockArgs["admin_group"] = admin_group
     airlockArgs["user_store"] = Path(user_store).absolute()
-
-    JUPYTERHUB_SERVICE_PREFIX = os.getenv("JUPYTERHUB_SERVICE_PREFIX", "/")
-    if not JUPYTERHUB_SERVICE_PREFIX.endswith("/"):
-        JUPYTERHUB_SERVICE_PREFIX += "/"
+    airlockArgs["baseurl"] = JUPYTERHUB_SERVICE_PREFIX
 
     def rule(p: str, handler: type[RequestHandler], *args: Any, **kwargs: Any) -> url:
         return url(
@@ -355,7 +383,6 @@ def main(filestore: str, user_store: str, admin_group: str, debug: bool) -> None
             rule("", HomeNoSlashHandler),
             rule("/", AirlockHandler, airlockArgs, name="home"),
             rule("/oauth_callback", HubOAuthCallbackHandler),
-            rule("/health/?", HealthHandler),
             # TODO: Enforce naming restrictions on user and server names in JupyterHub
             rule(
                 r"/egress/(?P<user>[^/]+)/(?P<egress>[^/]+)/?",
@@ -367,6 +394,13 @@ def main(filestore: str, user_store: str, admin_group: str, debug: bool) -> None
                 AirlockDownloadHandler,
                 airlockArgs,
             ),
+            rule(
+                r"/new/?",
+                AirlockSubmissionHandler,
+                airlockArgs,
+            ),
+            # Health is always at the top level, not under baseurl
+            ("/health/?", HealthHandler),
         ],
         static_url_prefix=url_path_join(JUPYTERHUB_SERVICE_PREFIX, "static/"),
         cookie_secret=os.urandom(32),

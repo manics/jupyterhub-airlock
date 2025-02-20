@@ -1,0 +1,22 @@
+{% extends "page.html" %}
+
+{% block site %}
+
+<h1>New Egress</h1>
+
+<a href="{{reverse_url('home')}}">Home</a>
+
+<h2>Select files to egress</h2>
+<form method="post" action="{{baseurl}}new/">
+<table class="egress-file-list">
+  <tr><th></th><th>file path</th><th>Size (bytes)</th></tr>
+{% for file, (fileid, size) in filelist.items() %}
+  <tr><td><input type="checkbox" id="file-{{fileid}}" name="file-{{fileid}}"/></td><td><label for="file-{{fileid}}">{{file}}</label></td><td>{{size}}</td></tr>
+{% end %}
+</table>
+
+<button type="submit" name="egress" value="egress">Egress 📦</button>
+<input type="hidden" name="_xsrf" value="{{xsrf_token}}"/>
+</form>
+
+{% end %}

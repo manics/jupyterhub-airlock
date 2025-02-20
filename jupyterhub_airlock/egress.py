@@ -1,7 +1,7 @@
 from enum import Enum
 import hashlib
 from pathlib import Path
-from typing import Any, Dict, TypeAlias
+from typing import Any, TypeAlias
 import json
 import re
 
@@ -90,7 +90,7 @@ class Egress:
             raise ValueError(f"Metadata for egress {self.id} not found")
         return json.loads(m.read_text())
 
-    def update_metadata(self, d: Dict[str, object], create: bool = False) -> None:
+    def update_metadata(self, d: dict[str, object], create: bool = False) -> None:
         """
         Update some metadata key-value pairs
         """
@@ -147,7 +147,7 @@ class Egress:
         self.update_metadata({"files": files})
         self.set_status(EgressStatus.PENDING)
 
-    def files_for_egress(self) -> Dict[str, str]:
+    def files_for_egress(self) -> dict[str, str]:
         """
         Return a map of {absolute_file_path : egress_file_path}
         for constructing downloadable outputs
@@ -166,7 +166,7 @@ class Egress:
         return file_path_map
 
 
-EgressList: TypeAlias = Dict[EgressStatus, Dict[str, Egress]]
+EgressList: TypeAlias = dict[EgressStatus, dict[str, Egress]]
 
 
 class EgressStore:

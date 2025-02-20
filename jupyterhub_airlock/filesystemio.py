@@ -3,12 +3,10 @@ import logging
 from pathlib import Path
 import shutil
 import zipfile
-from .egress import Egress
-from typing import Dict, List, Tuple
-
-
+from typing import Any, Callable, Awaitable, Coroutine, Iterable
+from urllib import parse
 from functools import wraps
-from typing import Any, Callable, Awaitable, Coroutine
+from .egress import Egress
 
 log = logging.getLogger("jupyterhub_airlock.download")
 
@@ -42,26 +40,38 @@ def delete_egress_zipfile(egress: Egress) -> None:
 
 
 @to_thread
-def copyfiles(filelist: List[Path], source: Path, dest: Path) -> None:
+def copyfiles(filelist: Iterable[Path], source: Path, dest: Path) -> None:
     for f in filelist:
         if f.is_absolute():
             raise ValueError(f"Expected relative paths, found {f}")
-        if not f.is_file():
+        if not (source / f).is_file():
             raise ValueError(f"Not a file: {f}")
 
     for f in filelist:
         s = source / f
         d = dest / f
-        d.mkdir(exist_ok=True)
+        d.parent.mkdir(exist_ok=True)
         shutil.copy(s, d)
 
 
+def escape_filepath(p: str | Path) -> str:
+    return parse.quote(str(p), safe="")
+
+
+def unescape_filepath(p: str) -> str:
+    return parse.unquote(p)
+
+
 @to_thread
-def filelist_and_size_recursive(dir: Path) -> Tuple[Dict[Path, int], int]:
+def filelist_and_size_recursive(dir: Path) -> tuple[dict[Path, tuple[str, int]], int]:
+    """
+    Recursively list files, return the file size and a url-safe encoded filepath
+    """
     filelist = {}
     total_size = 0
-    for p in dir.glob("**"):
+    for p in dir.glob("**/*"):
         if p.is_file():
-            filelist[p.relative_to(dir)] = p.stat().st_size
+            relative_path = p.relative_to(dir)
+            filelist[relative_path] = (escape_filepath(relative_path), p.stat().st_size)
             total_size += p.stat().st_size
     return filelist, total_size

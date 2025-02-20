@@ -13,24 +13,28 @@
   <dd>{{is_admin}}</dd>
 </dl>
 
+<form method="get" action="{{baseurl}}new/">
+  <button type="submit" name="new" value="new">New egress 🙏</button>
+</form>
+
 <h2>Pending</h2>
 <ul>
 {% for item in pending_list %}
-<li><a href="egress/{{item}}">{{item}}</a></li>
+<li><a href="{{baseurl}}egress/{{item}}">{{item}}</a></li>
 {% end %}
 </ul>
 
 <h2>Accepted</h2>
 <ul>
 {% for item in accepted_list %}
-<li><a href="egress/{{item}}">{{item}}</a></li>
+<li><a href="{{baseurl}}egress/{{item}}">{{item}}</a></li>
 {% end %}
 </ul>
 
 <h2>Rejected</h2>
 <ul>
 {% for item in rejected_list %}
-<li><a href="egress/{{item}}">{{item}}</a></li>
+<li><a href="{{baseurl}}egress/{{item}}">{{item}}</a></li>
 {% end %}
 </ul>
 
