@@ -5,8 +5,10 @@ https://github.com/jupyterhub/jupyterhub/blob/5.0.0/examples/service-whoami/whoa
 
 from argparse import ArgumentParser, SUPPRESS
 import asyncio
+from datetime import datetime, UTC
 import json
 import os
+from random import randint
 from urllib.parse import urlparse
 from pathlib import Path
 from typing import Any
@@ -27,7 +29,8 @@ from jupyterhub.services.auth import HubOAuthenticated
 from jupyterhub.utils import url_path_join
 
 from .egress import EgressStore, EgressStatus, Egress
-from .download import create_egress_zipfile
+from .filesystemio import create_egress_zipfile, delete_egress_zipfile
+from .filesystemio import copyfiles, filelist_and_size_recursive
 
 
 import logging
@@ -35,7 +38,15 @@ from http.client import responses
 
 log = logging.getLogger("jupyterhub_airlock")
 
+MAX_DIRECTORY_SIZE_MB = 100
+
 # JUPYTERHUB_API_TOKEN = os.environ["JUPYTERHUB_API_TOKEN"]
+
+
+def generate_egress_id(user: str) -> str:
+    return "{0}/{1}-{2:08d}".format(
+        user, datetime.now(UTC).strftime("%Y%m%d-%H%M%S-%f"), randint(0, 99999999)
+    )
 
 
 class HomeNoSlashHandler(RequestHandler):
@@ -46,6 +57,7 @@ class HomeNoSlashHandler(RequestHandler):
 class AirlockHandler(HubOAuthenticated, RequestHandler):  # type: ignore[misc]
     def initialize(self, **kwargs: Any) -> None:
         self.store: EgressStore = kwargs.pop("store")
+        self.user_store: Path = kwargs.pop("user_store")
         if not self.store:
             raise ValueError("store required")
         self.admin_group = kwargs.pop("admin_group")
@@ -135,6 +147,70 @@ class AirlockHandler(HubOAuthenticated, RequestHandler):  # type: ignore[misc]
         self.render(
             "error.html", status_code=status_code, reason=reason, message=message
         )
+
+
+class AirlockSubmissionHandler(AirlockHandler):
+    @addslash
+    @authenticated
+    async def get(self, user: str) -> None:
+        filelist, total_size = await filelist_and_size_recursive(self.user_store)
+        total_size_mb = total_size / 1024 / 1024
+        if total_size_mb > MAX_DIRECTORY_SIZE_MB:
+            raise ValueError(
+                "Directory size {total_size_mb} MB exceeds maximum {MAX_DIRECTORY_SIZE_MB} MB"
+            )
+
+        self.render(
+            "new.html",
+            filelist=filelist,
+            xsrf_token=self.xsrf_token.decode("ascii"),
+        )
+
+        raise NotImplementedError()
+        # List files in user's egress directory
+        # If submit clicked then POST:
+        # - create a new egress, status NEW
+        # - Copy files from user's egress dir to the new egress files dir
+        # - Add all files to the egress metadata
+        # - Set the egress to pending
+
+    @authenticated
+    async def post(self, user: str) -> None:
+        current_user_model = self.get_current_user()
+        log.debug(f"{current_user_model=}")
+        if not current_user_model:
+            raise HTTPError(403, reason="Missing user")
+
+        log.debug(f"{self.request.arguments=}")
+
+        filelist, total_size = await filelist_and_size_recursive(self.user_store)
+
+        # The file list from the browser should match filelist_and_size_recursive
+        # If it doesn't either the user has added/removed a file in the workspace
+        # or someone is trying to hack the system
+        request_files = self.request.arguments.get("files")
+        if not request_files:
+            raise HTTPError(422, "Expected files")
+        requested_file_paths = sorted(Path(str(f)) for f in request_files)
+
+        expected_file_paths = sorted(filelist.keys())
+
+        if expected_file_paths != requested_file_paths:
+            log.error(
+                f"Submitted files {requested_file_paths} is different from expected {expected_file_paths}"
+            )
+            raise HTTPError(409, reason="The egress directory was modified!")
+
+        egress_id = generate_egress_id(user)
+        egress = self.store.new_egress(egress_id)
+
+        await copyfiles(expected_file_paths, self.user_store, egress.path)
+        log.debug(
+            f"Copied {expected_file_paths} from {self.user_store} to {egress.path}"
+        )
+        egress.add_files()
+
+        self.redirect(f"../{egress_id}")
 
 
 class AirlockEgressHandler(AirlockHandler):
@@ -249,6 +325,7 @@ class AirlockDownloadHandler(AirlockHandler):
         log.info(f"Downloading {filepath}")
         await self._download(filepath)
         log.debug(f"Download complete {filepath}")
+        await delete_egress_zipfile(egress_item)
 
 
 class HealthHandler(RequestHandler):
@@ -257,10 +334,11 @@ class HealthHandler(RequestHandler):
         self.write(json.dumps({"status": "ok"}, indent=2, sort_keys=True))
 
 
-def main(filestore: str, admin_group: str, debug: bool) -> None:
+def main(filestore: str, user_store: str, admin_group: str, debug: bool) -> None:
     airlockArgs: dict[str, Any] = {}
     airlockArgs["store"] = EgressStore(Path(filestore))
     airlockArgs["admin_group"] = admin_group
+    airlockArgs["user_store"] = Path(user_store).absolute()
 
     JUPYTERHUB_SERVICE_PREFIX = os.getenv("JUPYTERHUB_SERVICE_PREFIX", "/")
     if not JUPYTERHUB_SERVICE_PREFIX.endswith("/"):
@@ -319,6 +397,9 @@ if __name__ == "__main__":
     parser.add_argument("--debug", action="store_true", help=SUPPRESS)
     parser.add_argument("--filestore", required=True, help="Egress filestore directory")
     parser.add_argument(
+        "--userstore", required=True, help="User workspace egress filestore"
+    )
+    parser.add_argument(
         "--admin-group", default="egress-admins", help="Egress admin group"
     )
     args = parser.parse_args()
@@ -332,4 +413,4 @@ if __name__ == "__main__":
         )
     )
     log.addHandler(h)
-    main(args.filestore, args.admin_group, args.debug)
+    main(args.filestore, args.userstore, args.admin_group, args.debug)
