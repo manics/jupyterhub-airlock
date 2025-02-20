@@ -172,3 +172,10 @@ cython_debug/
 
 # PyPI configuration file
 .pypirc
+
+# jupyterhub-airlock
+jupyterhub_cookie_secret
+jupyterhub.sqlite
+jupyterhub-proxy.pid
+example/users/
+example/egress-store/
