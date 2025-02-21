@@ -1,15 +1,17 @@
-from jupyterhub_airlock.egress import (
-    EgressStore,
-    Egress,
-    EgressStatus,
-    is_valid_egress_id,
-    is_valid_egress_component,
-)
 import json
+from pathlib import Path
 from shutil import copytree
+
 import pytest
 from conftest import random_egress_id
-from pathlib import Path
+
+from jupyterhub_airlock.egress import (
+    Egress,
+    EgressStatus,
+    EgressStore,
+    is_valid_egress_component,
+    is_valid_egress_id,
+)
 
 HERE = Path(__file__).parent
 

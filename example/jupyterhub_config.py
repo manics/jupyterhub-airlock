@@ -1,7 +1,7 @@
 # Configuration file for jupyterhub
 # Uses Dummy authenticator and Simple spawner
-from pathlib import Path
 import sys
+from pathlib import Path
 
 c = get_config()  # noqa
 # c.Application.log_level = 'DEBUG'

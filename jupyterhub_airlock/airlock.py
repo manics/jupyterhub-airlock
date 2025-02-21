@@ -3,38 +3,40 @@
 https://github.com/jupyterhub/jupyterhub/blob/5.0.0/examples/service-whoami/whoami-oauth.py
 """
 
-from argparse import ArgumentParser, SUPPRESS
 import asyncio
-from datetime import datetime, UTC
 import json
+import logging
 import os
-from random import randint
-from urllib.parse import urlparse
+from argparse import SUPPRESS, ArgumentParser
+from datetime import UTC, datetime
+from http.client import responses
 from pathlib import Path
+from random import randint
 from typing import Any
+from urllib.parse import urlparse
 
+from jupyterhub.services.auth import HubOAuthCallbackHandler, HubOAuthenticated
+from jupyterhub.utils import url_path_join
 from tornado.httpserver import HTTPServer
 from tornado.ioloop import IOLoop
-from tornado.web import Application
-from tornado.web import RequestHandler
-from tornado.web import HTTPError
-from tornado.web import authenticated
-from tornado.web import addslash
-from tornado.web import url
 from tornado.iostream import StreamClosedError
+from tornado.web import (
+    Application,
+    HTTPError,
+    RequestHandler,
+    addslash,
+    authenticated,
+    url,
+)
 
-
-from jupyterhub.services.auth import HubOAuthCallbackHandler
-from jupyterhub.services.auth import HubOAuthenticated
-from jupyterhub.utils import url_path_join
-
-from .egress import EgressStore, EgressStatus, Egress, EGRESS_FILE_DIR
-from .filesystemio import create_egress_zipfile, delete_egress_zipfile
-from .filesystemio import copyfiles, filelist_and_size_recursive, unescape_filepath
-
-
-import logging
-from http.client import responses
+from .egress import EGRESS_FILE_DIR, Egress, EgressStatus, EgressStore
+from .filesystemio import (
+    copyfiles,
+    create_egress_zipfile,
+    delete_egress_zipfile,
+    filelist_and_size_recursive,
+    unescape_filepath,
+)
 
 log = logging.getLogger("jupyterhub_airlock")
 

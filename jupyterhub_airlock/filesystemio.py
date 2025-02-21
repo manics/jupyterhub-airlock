@@ -1,11 +1,12 @@
 import asyncio
 import logging
-from pathlib import Path
 import shutil
 import zipfile
-from typing import Any, Callable, Awaitable, Coroutine, Iterable
-from urllib import parse
 from functools import wraps
+from pathlib import Path
+from typing import Any, Awaitable, Callable, Coroutine, Iterable
+from urllib import parse
+
 from .egress import Egress
 
 log = logging.getLogger("jupyterhub_airlock.download")
