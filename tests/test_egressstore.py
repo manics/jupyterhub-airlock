@@ -1,4 +1,5 @@
 import json
+import os
 from pathlib import Path
 from shutil import copytree
 
@@ -75,6 +76,7 @@ def test_egress_eq(tmp_path):
     e = Egress("abc/123", tmp_path / "abc/123", create=True)
     assert e == Egress("abc/123", tmp_path / "abc/123")
     assert e != Egress("abc/124", tmp_path / "abc/124")
+    assert e != object()
 
 
 def test_egress_check_path_absolute():
@@ -93,6 +95,10 @@ def test_egressstore_new(tmp_path, egress_id):
 
     store = EgressStore(tmp_path)
     assert store.list("*") == {}
+
+    with pytest.raises(ValueError) as exc_info:
+        store.get_egress(egress_id)
+    assert exc_info.value.args[0] == f"Egress {egress_id} not found"
 
     egress = store.new_egress(egress_id)
     assert egress.id == egress_id
@@ -187,6 +193,7 @@ def test_egressstore_add_files(tmp_path, egress_id):
 
     egress.add_files()
 
+    assert egress.status() == EgressStatus.PENDING
     assert sorted(str(p.relative_to(tmp_path)) for p in tmp_path.rglob("*")) == [
         u_id,
         egress_id,
@@ -213,12 +220,27 @@ def test_egressstore_add_files(tmp_path, egress_id):
             ],
         }
 
-        with pytest.raises(ValueError) as exc_info:
-            egress.add_files()
-        assert (
-            exc_info.value.args[0]
-            == "Can only add files to status new, current status pending"
-        )
+    with pytest.raises(ValueError) as exc_info:
+        egress.add_files()
+    assert (
+        exc_info.value.args[0]
+        == "Can only add files to status new, current status pending"
+    )
+
+
+def test_egressstore_add_invalid_files(tmp_path, egress_id):
+    store = EgressStore(tmp_path)
+    egress = store.new_egress(egress_id)
+
+    # Create a unix socket file
+    os.mkfifo(str(egress.path / "files" / "s.sock"))
+
+    with pytest.raises(ValueError) as exc_info:
+        egress.add_files()
+    assert (
+        exc_info.value.args[0]
+        == f"Not a standard file: {tmp_path}/{egress_id}/files/s.sock"
+    )
 
 
 def test_unicode_files(tmp_path):
@@ -244,4 +266,26 @@ def test_unicode_files(tmp_path):
                 "sha256sum": "620e834dad842f4baeb891b38f1db82b9c1c84401d2ba33f5a8036a856dc9719",
             }
         ],
+    }
+
+
+def test_egressstore_files_for_egress(tmp_path, egress_id):
+    store = EgressStore(tmp_path)
+    egress = store.new_egress(egress_id)
+
+    (egress.path / "files" / "hello.txt").write_text("hello")
+    (egress.path / "files" / '{"}').mkdir()
+    (egress.path / "files" / '{"}' / "world.txt").write_text("world")
+
+    egress.add_files()
+    with pytest.raises(ValueError) as exc_info:
+        egress.files_for_egress()
+    assert exc_info.value.args[0] == f"Egress must be accepted, current status pending"
+
+    egress.set_status(EgressStatus.ACCEPTED)
+    files = egress.files_for_egress()
+    assert files == {
+        f"{tmp_path}/{egress_id}/metadata.json": "metadata.json",
+        f"{tmp_path}/{egress_id}/files/hello.txt": "files/hello.txt",
+        f'{tmp_path}/{egress_id}/files/{{"}}/world.txt': 'files/{"}/world.txt',
     }

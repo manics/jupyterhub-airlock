@@ -9,7 +9,7 @@ from urllib import parse
 
 from .egress import Egress
 
-log = logging.getLogger("jupyterhub_airlock.download")
+log = logging.getLogger(__name__)
 
 
 def to_thread[T, **P](func: Callable[P, T]) -> Callable[P, Awaitable[T]]:

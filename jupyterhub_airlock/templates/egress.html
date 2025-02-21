@@ -2,9 +2,12 @@
 
 {% block site %}
 
-<h1>Egress {{egress["id"]}}: {{egress["status"]}}</h1>
+<h1>Egress {{egress["id"]}}: {{egress["status"]}}
+  {% if egress["status"] == "accepted" %}✅{% end %}
+  {% if egress["status"] == "rejected" %}❌{% end %}
+</h1>
 
-<a href="{{reverse_url('home')}}">Home</a>
+{% include _info.html %}
 
 <h2>{{len(egress["files"])}} files</h2>
 <table class="egress-file-list">

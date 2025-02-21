@@ -10,7 +10,7 @@ from .filesystemio import (
     filelist_and_size_recursive,
 )
 
-log = logging.getLogger("jupyterhub_airlock")
+log = logging.getLogger(__name__)
 
 USER_EGRESS_DIR = "egress"
 

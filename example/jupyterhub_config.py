@@ -29,8 +29,7 @@ c.JupyterHub.services = [
         "url": "http://127.0.0.1:10112",
         "command": [
             sys.executable,
-            "-mjupyterhub_airlock.airlock",
-            # "jupyterhub-airlock",
+            "-mjupyterhub_airlock.main",
             "--filestore",
             "egress-store",
             "--debug",

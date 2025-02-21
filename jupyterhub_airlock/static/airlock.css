@@ -13,3 +13,8 @@ table.egress-file-list tr th {
   padding: 0 1vw;
   text-align: left;
 }
+
+div.version-info {
+  font-size: xx-small;
+  text-align: right;
+}

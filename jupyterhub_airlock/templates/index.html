@@ -4,14 +4,7 @@
 
 <h1>JupyterHub Airlock</h1>
 
-<dl>
-  <dt>User</dt>
-  <dd>{{username}}</dd>
-  <dt>Groups</dt>
-  <dd>{{groups}}</dd>
-  <dt>Admin</dt>
-  <dd>{{is_admin}}</dd>
-</dl>
+{% include _info.html %}
 
 <form method="get" action="{{baseurl}}new/">
   <button type="submit" name="new" value="new">New egress 🙏</button>

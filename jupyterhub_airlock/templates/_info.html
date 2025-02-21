@@ -1,0 +1,18 @@
+{% block baseinfo %}
+
+<a href="{{reverse_url('home')}}">Home</a>
+
+{% if username %}
+<dl>
+  <dt>User</dt>
+  <dd>{{username}}</dd>
+  <dt>Groups</dt>
+  <dd>{{groups}}</dd>
+  {% if is_admin %}
+  <dt>Admin</dt>
+  <dd>{{is_admin}}</dd>
+  {% end %}
+</dl>
+{% end %}
+
+{% end %}

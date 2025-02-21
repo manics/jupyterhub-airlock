@@ -17,7 +17,7 @@ requires-python = ">= 3.10"
 Repository = "https://github.com/manics/jupyterhub-airlock.git"
 
 [project.scripts]
-jupyterhub-airlock = "jupyterhub_airlock.airlock:main"
+jupyterhub-airlock = "jupyterhub_airlock.main:main"
 
 [tool.setuptools.dynamic]
 dependencies = {file = ["requirements.in"]}
@@ -27,7 +27,7 @@ version_file = "jupyterhub_airlock/_version.py"
 
 [tool.pytest.ini_options]
 minversion = "8.0"
-addopts = "-ra -q --cov jupyterhub_airlock/"
+addopts = "-ra --cov jupyterhub_airlock/ --cov-report term-missing"
 testpaths = [
     "tests",
 ]

@@ -1,4 +1,3 @@
-#!/usr/bin/env python
 """
 https://github.com/jupyterhub/jupyterhub/blob/5.0.0/examples/service-whoami/whoami-oauth.py
 """
@@ -7,10 +6,8 @@ import asyncio
 import json
 import logging
 import os
-from argparse import SUPPRESS, ArgumentParser
 from http.client import responses
 from pathlib import Path
-from random import randint
 from typing import Any
 from urllib.parse import urlparse
 
@@ -28,6 +25,7 @@ from tornado.web import (
     url,
 )
 
+from ._version import version
 from .egress import EGRESS_FILE_DIR, Egress, EgressStatus, EgressStore
 from .filesystemio import (
     create_egress_zipfile,
@@ -36,7 +34,7 @@ from .filesystemio import (
 )
 from .user_egress import UserEgressStore
 
-log = logging.getLogger("jupyterhub_airlock")
+log = logging.getLogger(__name__)
 
 MAX_DIRECTORY_SIZE_MB = 100
 
@@ -65,12 +63,33 @@ class AirlockHandler(HubOAuthenticated, RequestHandler):  # type: ignore[misc]
     def get_template_path(self) -> str:
         return os.path.join(os.path.dirname(__file__), "templates")
 
+    def get_template_namespace(self) -> dict[str, Any]:
+        """
+        Provides default variables that are included in all templates
+        """
+        ns = super().get_template_namespace()
+        ns["baseurl"] = self.baseurl
+        ns["version"] = version
+        user = self.get_current_user()
+        if user:
+            ns["username"] = user.get("name")
+            ns["groups"] = user.get("groups")
+            ns["is_admin"] = self.is_admin()
+        else:
+            ns["username"] = None
+            ns["groups"] = None
+            ns["is_admin"] = None
+        return ns
+
     def is_admin(self) -> bool:
-        user = self.get_current_user()["name"]
-        groups = self.get_current_user()["groups"]
-        admin = self.admin_group in groups
-        log.debug(f"is_admin {user} {groups}: {admin}")
-        return admin
+        user = self.get_current_user()
+        if user:
+            username = user["name"]
+            groups = user["groups"]
+            admin = self.admin_group in groups
+            log.debug(f"is_admin {username} {groups}: {admin}")
+            return admin
+        return False
 
     def is_viewer(self, egress: Egress) -> bool:
         user = self.get_current_user()["name"]
@@ -118,13 +137,15 @@ class AirlockHandler(HubOAuthenticated, RequestHandler):  # type: ignore[misc]
         egress_list = self.store.list("*" if is_admin else username)
         self.render(
             "index.html",
-            baseurl=self.baseurl,
-            username=username,
-            groups=groups,
-            pending_list=egress_list.get(EgressStatus.PENDING, []),
-            accepted_list=egress_list.get(EgressStatus.ACCEPTED, []),
-            rejected_list=egress_list.get(EgressStatus.REJECTED, []),
-            is_admin=is_admin,
+            pending_list=sorted(
+                egress_list.get(EgressStatus.PENDING, []), reverse=True
+            ),
+            accepted_list=sorted(
+                egress_list.get(EgressStatus.ACCEPTED, []), reverse=True
+            ),
+            rejected_list=sorted(
+                egress_list.get(EgressStatus.REJECTED, []), reverse=True
+            ),
         )
 
         # self.set_header("content-type", "application/json")
@@ -168,7 +189,6 @@ class AirlockSubmissionHandler(AirlockHandler):
 
         self.render(
             "new.html",
-            baseurl=self.baseurl,
             filelist=filelist,
             xsrf_token=self.xsrf_token.decode("ascii"),
         )
@@ -229,7 +249,6 @@ class AirlockEgressHandler(AirlockHandler):
         if self.is_admin() or username == user or is_reviewer:
             self.render(
                 "egress.html",
-                baseurl=self.baseurl,
                 egress=egress_item.metadata(),
                 is_reviewer=is_reviewer,
                 is_downloader=is_downloader,
@@ -329,7 +348,7 @@ class HealthHandler(RequestHandler):
         self.write(json.dumps({"status": "ok"}, indent=2, sort_keys=True))
 
 
-def start(filestore: str, user_store: str, admin_group: str, debug: bool) -> None:
+def airlock(filestore: str, user_store: str, admin_group: str, debug: bool) -> None:
     JUPYTERHUB_SERVICE_PREFIX = os.getenv("JUPYTERHUB_SERVICE_PREFIX", "/")
     if not JUPYTERHUB_SERVICE_PREFIX.endswith("/"):
         JUPYTERHUB_SERVICE_PREFIX += "/"
@@ -391,32 +410,3 @@ def start(filestore: str, user_store: str, admin_group: str, debug: bool) -> Non
     log.info(f"Listening on {hostname}:{port}")
     http_server.listen(port, hostname)
     IOLoop.current().start()
-
-
-def main() -> None:
-    parser = ArgumentParser("JupyterHub Guacamole handler")
-    parser.add_argument("--log-level", default="INFO", help="Log level")
-    parser.add_argument("--debug", action="store_true", help=SUPPRESS)
-    parser.add_argument("--filestore", required=True, help="Egress filestore directory")
-    parser.add_argument(
-        "--userstore", required=True, help="User workspace egress filestore"
-    )
-    parser.add_argument(
-        "--admin-group", default="egress-admins", help="Egress admin group"
-    )
-    args = parser.parse_args()
-
-    log_level = "DEBUG" if args.debug else args.log_level.upper()
-    log.setLevel(log_level)
-    h = logging.StreamHandler()
-    h.setFormatter(
-        logging.Formatter(
-            "[%(levelname)1.1s %(asctime)s %(module)s:%(lineno)d] %(message)s"
-        )
-    )
-    log.addHandler(h)
-    start(args.filestore, args.userstore, args.admin_group, args.debug)
-
-
-if __name__ == "__main__":
-    main()
