@@ -8,7 +8,6 @@ import json
 import logging
 import os
 from argparse import SUPPRESS, ArgumentParser
-from datetime import UTC, datetime
 from http.client import responses
 from pathlib import Path
 from random import randint
@@ -31,25 +30,17 @@ from tornado.web import (
 
 from .egress import EGRESS_FILE_DIR, Egress, EgressStatus, EgressStore
 from .filesystemio import (
-    copyfiles,
     create_egress_zipfile,
     delete_egress_zipfile,
-    filelist_and_size_recursive,
     unescape_filepath,
 )
+from .user_egress import UserEgressStore
 
 log = logging.getLogger("jupyterhub_airlock")
 
 MAX_DIRECTORY_SIZE_MB = 100
-USER_EGRESS_DIR = "egress"
 
 # JUPYTERHUB_API_TOKEN = os.environ["JUPYTERHUB_API_TOKEN"]
-
-
-def generate_egress_id(user: str) -> str:
-    return "{0}/{1}-{2:08d}".format(
-        user, datetime.now(UTC).strftime("%Y%m%d-%H%M%S-%f"), randint(0, 99999999)
-    )
 
 
 class HomeNoSlashHandler(RequestHandler):
@@ -61,9 +52,11 @@ class AirlockHandler(HubOAuthenticated, RequestHandler):  # type: ignore[misc]
     def initialize(self, **kwargs: Any) -> None:
         self.baseurl: str = kwargs.pop("baseurl")
         self.store: EgressStore = kwargs.pop("store")
-        self.user_store: Path = kwargs.pop("user_store")
+        self.user_store: UserEgressStore = kwargs.pop("user_store")
         if not self.store:
             raise ValueError("store required")
+        if not self.user_store:
+            raise ValueError("user_store required")
         self.admin_group = kwargs.pop("admin_group")
         if not self.admin_group:
             raise ValueError("admin_group required")
@@ -155,16 +148,7 @@ class AirlockHandler(HubOAuthenticated, RequestHandler):  # type: ignore[misc]
         )
 
 
-# TODO: Break this into separate API/backend and frontend code
 class AirlockSubmissionHandler(AirlockHandler):
-    async def _list_egress_files(
-        self, user: str
-    ) -> tuple[dict[Path, tuple[str, int]], int, Path]:
-        user_egress_path = self.user_store / user / USER_EGRESS_DIR
-        log.debug(f"Listing files in: {user_egress_path}")
-        filelist, total_size = await filelist_and_size_recursive(user_egress_path)
-        return filelist, total_size, user_egress_path
-
     @addslash
     @authenticated
     async def get(self) -> None:
@@ -174,7 +158,7 @@ class AirlockSubmissionHandler(AirlockHandler):
             raise HTTPError(403, reason="Missing user")
         username = current_user_model["name"]
 
-        filelist, total_size, _ = await self._list_egress_files(username)
+        filelist, total_size, _ = await self.user_store.list_egress_files(username)
         total_size_mb = total_size / 1024 / 1024
         if total_size_mb > MAX_DIRECTORY_SIZE_MB:
             raise HTTPError(
@@ -199,46 +183,28 @@ class AirlockSubmissionHandler(AirlockHandler):
 
         log.debug(f"{self.request.arguments=}")
 
-        filelist, _, user_egress_path = await self._list_egress_files(username)
-        allowed_file_paths = filelist.keys()
-        log.debug(f"{allowed_file_paths=}")
-
         request_arg_egress = self.request.arguments.get("egress")
         if request_arg_egress != [b"egress"]:
             log.error(f"Unexpected value for argument egress: {request_arg_egress}")
             raise HTTPError(400, reason="Unexpected form value")
 
-        # The requested file should match filelist_and_size_recursive
-        # If it doesn't either the user has removed a file in the workspace
-        # or someone is trying to hack the system
         requested_files = set()
         for arg, value in self.request.arguments.items():
             if arg.startswith("file-"):
                 if value != [b"on"]:
                     log.error(f"Unexpected value for argument {arg}: {value}")
                     raise HTTPError(400, reason="Unexpected form value")
+                filepath = unescape_filepath(arg[5:])
+                requested_files.add(filepath)
 
-                filepath = Path(unescape_filepath(arg[5:]))
-                if filepath not in allowed_file_paths:
-                    log.error(f"Invalid file argument: {arg} ({filepath})")
-                    raise HTTPError(409, reason="Invalid file requested")
-                else:
-                    requested_files.add(filepath)
+        try:
+            egress = await self.user_store.new_egress(
+                self.store, username, requested_files
+            )
+        except ValueError as e:
+            raise HTTPError(400, reason=e.args[0]) from e
 
-        if not requested_files:
-            raise HTTPError(400, reason="No files selected")
-
-        egress_id = generate_egress_id(username)
-        egress = self.store.new_egress(egress_id)
-        egress_dest_path = egress.path / EGRESS_FILE_DIR
-
-        await copyfiles(requested_files, user_egress_path, egress_dest_path)
-        log.debug(
-            f"Copied {requested_files} from {user_egress_path} to {egress_dest_path}"
-        )
-        egress.add_files()
-
-        self.redirect(f"{self.baseurl}egress/{egress_id}")
+        self.redirect(f"{self.baseurl}egress/{egress.id}")
 
 
 class AirlockEgressHandler(AirlockHandler):
@@ -371,7 +337,7 @@ def main(filestore: str, user_store: str, admin_group: str, debug: bool) -> None
     airlockArgs: dict[str, Any] = {}
     airlockArgs["store"] = EgressStore(Path(filestore))
     airlockArgs["admin_group"] = admin_group
-    airlockArgs["user_store"] = Path(user_store).absolute()
+    airlockArgs["user_store"] = UserEgressStore(Path(user_store))
     airlockArgs["baseurl"] = JUPYTERHUB_SERVICE_PREFIX
 
     def rule(p: str, handler: type[RequestHandler], *args: Any, **kwargs: Any) -> url:
