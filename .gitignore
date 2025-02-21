@@ -179,3 +179,4 @@ jupyterhub.sqlite
 jupyterhub-proxy.pid
 example/users/
 example/egress-store/
+jupyterhub_airlock/_version.py

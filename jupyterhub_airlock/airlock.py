@@ -329,7 +329,7 @@ class HealthHandler(RequestHandler):
         self.write(json.dumps({"status": "ok"}, indent=2, sort_keys=True))
 
 
-def main(filestore: str, user_store: str, admin_group: str, debug: bool) -> None:
+def start(filestore: str, user_store: str, admin_group: str, debug: bool) -> None:
     JUPYTERHUB_SERVICE_PREFIX = os.getenv("JUPYTERHUB_SERVICE_PREFIX", "/")
     if not JUPYTERHUB_SERVICE_PREFIX.endswith("/"):
         JUPYTERHUB_SERVICE_PREFIX += "/"
@@ -393,7 +393,7 @@ def main(filestore: str, user_store: str, admin_group: str, debug: bool) -> None
     IOLoop.current().start()
 
 
-if __name__ == "__main__":
+def main() -> None:
     parser = ArgumentParser("JupyterHub Guacamole handler")
     parser.add_argument("--log-level", default="INFO", help="Log level")
     parser.add_argument("--debug", action="store_true", help=SUPPRESS)
@@ -415,4 +415,8 @@ if __name__ == "__main__":
         )
     )
     log.addHandler(h)
-    main(args.filestore, args.userstore, args.admin_group, args.debug)
+    start(args.filestore, args.userstore, args.admin_group, args.debug)
+
+
+if __name__ == "__main__":
+    main()

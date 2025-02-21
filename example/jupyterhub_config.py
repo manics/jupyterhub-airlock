@@ -30,6 +30,7 @@ c.JupyterHub.services = [
         "command": [
             sys.executable,
             "-mjupyterhub_airlock.airlock",
+            # "jupyterhub-airlock",
             "--filestore",
             "egress-store",
             "--debug",

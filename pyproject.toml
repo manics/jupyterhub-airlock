@@ -1,0 +1,33 @@
+[build-system]
+requires = ["setuptools>=75", "setuptools-scm>=8"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "jupyterhub-airlock"
+dynamic = ["dependencies", "version"]
+authors = [
+  {name = "Simon Li"},
+]
+description = "JupyterHub Airlock"
+license = {text = "BSD-3-Clause"}
+readme = "README.md"
+requires-python = ">= 3.10"
+
+[project.urls]
+Repository = "https://github.com/manics/jupyterhub-airlock.git"
+
+[project.scripts]
+jupyterhub-airlock = "jupyterhub_airlock.airlock:main"
+
+[tool.setuptools.dynamic]
+dependencies = {file = ["requirements.in"]}
+
+[tool.setuptools_scm]
+version_file = "jupyterhub_airlock/_version.py"
+
+[tool.pytest.ini_options]
+minversion = "8.0"
+addopts = "-ra -q --cov jupyterhub_airlock/"
+testpaths = [
+    "tests",
+]
