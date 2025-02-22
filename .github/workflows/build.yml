@@ -3,6 +3,16 @@ on:
   push:
   pull_request:
 
+env:
+  REGISTRY: ghcr.io
+  # OWNER: ${{ github.repository_owner }}
+  OWNER_IMAGE: ${{ github.repository }}
+  # Set to "" to publish container on tags only
+  # Set to "<branch-name>" to also publish on every push to <branch-name>
+  PUBLISH_BRANCH: "main"
+  DEV_BRANCH: "dev"
+  PLATFORMS: linux/amd64,linux/arm64
+
 jobs:
   test:
     name: Test
@@ -21,9 +31,80 @@ jobs:
       # https://github.com/pre-commit/action
       - uses: pre-commit/action@v3.0.1
 
+      # - uses: actions/setup-node@v4
+
       - name: Install dependencies
         run: |
           pip install -r requirements-dev.txt
+          # npm install -g configurable-http-proxy
 
       - name: Run tests
         run: python -mpytest
+
+  container:
+    name: Container
+    runs-on: ubuntu-24.04
+    needs:
+      - test
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Get version
+        run: |
+          pip install setuptools-scm
+          VERSION=$(python -msetuptools_scm)
+          if [ -z "$VERSION"]; then
+            echo "Failed to get VERSION"
+            exit 1
+          fi
+          echo "VERSION=$VERSION" >> $GITHUB_ENV
+
+      - name: Docker meta
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          flavor: latest=false
+          images: ${{ env.REGISTRY }}/${{ env.OWNER_IMAGE }}
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Should container be pushed
+        run: |
+          PUSH="${{ github.event_name == 'push' &&
+            (
+              github.ref == format('refs/heads/{0}', env.PUBLISH_BRANCH) ||
+              github.ref == format('refs/heads/{0}', env.DEV_BRANCH) ||
+              startsWith(github.ref, 'refs/tags/')
+            )
+          }}"
+          echo PUSH="$PUSH" >> $GITHUB_ENV
+
+      - name: Login to container registry
+        uses: docker/login-action@v3
+        if: ${{ env.PUSH == 'true' }}
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push to container registry
+        uses: docker/build-push-action@v6
+        with:
+          # Needed so that .git directory is available to embed version info
+          platforms: ${{ env.PLATFORMS }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          push: ${{ env.PUSH }}
+          build-args: |
+            SETUPTOOLS_SCM_PRETEND_VERSION_FOR_JUPYTERHUB_AIRLOCK=${{ env.VERSION }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
