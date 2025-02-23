@@ -54,16 +54,6 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Get version
-        run: |
-          pip install setuptools-scm
-          VERSION=$(python -msetuptools_scm)
-          if [ -z "$VERSION"]; then
-            echo "Failed to get VERSION"
-            exit 1
-          fi
-          echo "VERSION=$VERSION" >> $GITHUB_ENV
-
       - name: Docker meta
         id: meta
         uses: docker/metadata-action@v5
@@ -104,7 +94,6 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           push: ${{ env.PUSH }}
-          build-args: |
-            SETUPTOOLS_SCM_PRETEND_VERSION_FOR_JUPYTERHUB_AIRLOCK=${{ env.VERSION }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          # Caching fails if we include the .git directory in the image 🙁
+          # cache-from: type=gha
+          # cache-to: type=gha,mode=max

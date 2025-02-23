@@ -9,11 +9,9 @@ RUN useradd --create-home --uid 1000 jovyan
 COPY jupyterhub_airlock /src/jupyterhub_airlock
 COPY LICENSE.txt pyproject.toml requirements.in requirements.txt /src/
 
-# Override this with a build-arg so that we don't need to copy .git
-ARG SETUPTOOLS_SCM_PRETEND_VERSION_FOR_JUPYTERHUB_AIRLOCK=0.0.0
-# COPY .git /src/.git
+# This will invalidate the cache 🙁
+COPY .git /src/.git
 RUN pip install --no-cache-dir -r /src/requirements.txt /src
-RUN pip install /src
 
 USER jovyan
 
