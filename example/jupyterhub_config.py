@@ -26,6 +26,7 @@ c.Authenticator.admin_users = {"admin", "demo"}
 c.JupyterHub.services = [
     {
         "name": "airlock",
+        # "api_token": "Needed if running as external service (doubles as client secret)"
         "url": "http://127.0.0.1:10112",
         "command": [
             sys.executable,
@@ -54,15 +55,15 @@ c.JupyterHub.load_roles = [
         # grant all users access to all services
         "scopes": ["access:services", "self"],
     },
-    {
-        "name": "airlock",
-        "scopes": [
-            "read:users",
-            "read:servers",
-            "admin:server_state",
-        ],
-        "services": ["airlock"],
-    },
+    # {
+    #     "name": "airlock",
+    #     "scopes": [
+    #         "read:users",
+    #         "read:servers",
+    #         "admin:server_state",
+    #     ],
+    #     "services": ["airlock"],
+    # },
 ]
 
 # Don't automatically go to server, easier to test hub

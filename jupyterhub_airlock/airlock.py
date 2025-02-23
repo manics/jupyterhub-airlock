@@ -41,11 +41,6 @@ MAX_DIRECTORY_SIZE_MB = 100
 # JUPYTERHUB_API_TOKEN = os.environ["JUPYTERHUB_API_TOKEN"]
 
 
-class HomeNoSlashHandler(RequestHandler):
-    def get(self) -> None:
-        self.redirect(self.settings["baseurl"])
-
-
 class AirlockHandler(HubOAuthenticated, RequestHandler):  # type: ignore[misc]
     def initialize(self, **kwargs: Any) -> None:
         self.baseurl: str = kwargs.pop("baseurl")
@@ -114,6 +109,7 @@ class AirlockHandler(HubOAuthenticated, RequestHandler):  # type: ignore[misc]
         log.debug(f"is_downloader {user} {egress.id}: {downloader}")
         return downloader
 
+    @addslash
     @authenticated
     async def get(self) -> None:
         current_user_model = self.get_current_user()
@@ -367,22 +363,21 @@ def airlock(filestore: str, user_store: str, admin_group: str, debug: bool) -> N
     # https://www.tornadoweb.org/en/stable/web.html#tornado.web.URLSpec
     app = Application(
         [
-            rule("", HomeNoSlashHandler),
-            rule("/", AirlockHandler, airlockArgs, name="home"),
-            rule("/oauth_callback", HubOAuthCallbackHandler),
+            rule(r"/?", AirlockHandler, airlockArgs, name="home"),
+            rule("oauth_callback", HubOAuthCallbackHandler),
             # TODO: Enforce naming restrictions on user and server names in JupyterHub
             rule(
-                r"/egress/(?P<user>[^/]+)/(?P<egress>[^/]+)/?",
+                r"egress/(?P<user>[^/]+)/(?P<egress>[^/]+)/?",
                 AirlockEgressHandler,
                 airlockArgs,
             ),
             rule(
-                r"/egress/(?P<user>[^/]+)/(?P<egress>[^/]+)/download",
+                r"egress/(?P<user>[^/]+)/(?P<egress>[^/]+)/download",
                 AirlockDownloadHandler,
                 airlockArgs,
             ),
             rule(
-                r"/new/?",
+                r"new/?",
                 AirlockSubmissionHandler,
                 airlockArgs,
             ),
