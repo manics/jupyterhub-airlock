@@ -8,10 +8,11 @@ RUN useradd --create-home --uid 1000 jovyan
 
 COPY jupyterhub_airlock /src/jupyterhub_airlock
 COPY LICENSE.txt pyproject.toml requirements.in requirements.txt /src/
+RUN pip install --no-cache-dir -r /src/requirements.txt
 
 # This will invalidate the cache 🙁
 COPY .git /src/.git
-RUN pip install --no-cache-dir -r /src/requirements.txt /src
+RUN pip install --no-cache-dir /src
 
 USER jovyan
 

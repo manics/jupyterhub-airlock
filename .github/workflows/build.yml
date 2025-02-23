@@ -90,10 +90,11 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           # Needed so that .git directory is available to embed version info
+          context: .
           platforms: ${{ env.PLATFORMS }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           push: ${{ env.PUSH }}
           # Caching fails if we include the .git directory in the image 🙁
-          # cache-from: type=gha
-          # cache-to: type=gha,mode=max
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
