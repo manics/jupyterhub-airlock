@@ -51,7 +51,7 @@ def copyfiles(filelist: Iterable[Path], source: Path, dest: Path) -> None:
     for f in filelist:
         s = source / f
         d = dest / f
-        d.parent.mkdir(exist_ok=True)
+        d.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy(s, d)
 
 

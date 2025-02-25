@@ -30,7 +30,7 @@ def tmp_stores(tmp_path):
     egress_path = tmp_path / "egress"
 
     username = "user-1"
-    d = user_path / username / "@^'🦆"
+    d = user_path / username / "@^'🦆" / "multi" / "level"
     d.mkdir(parents=True)
     (d / "hello.txt").write_text("hello\n")
     (user_path / username / "a.txt").write_text("\n\n")
@@ -56,7 +56,10 @@ async def test_list_egress_files(tmp_stores):
 
     filelist, total_size, user_egress_path = await store.list_egress_files(username)
     assert filelist == {
-        Path("@^'🦆/hello.txt"): ("%40%5E%27%F0%9F%A6%86%2Fhello.txt", 6),
+        Path("@^'🦆/multi/level/hello.txt"): (
+            "%40%5E%27%F0%9F%A6%86%2Fmulti%2Flevel%2Fhello.txt",
+            6,
+        ),
         Path("a.txt"): ("a.txt", 2),
     }
     assert total_size == 8
@@ -69,7 +72,7 @@ async def test_new_egress(tmp_stores, patch_datetime_now):
     user_store = UserEgressStore(user_path)
     egress_store = EgressStore(egress_path)
 
-    requested_files = ["@^'🦆/hello.txt", "a.txt"]
+    requested_files = ["@^'🦆/multi/level/hello.txt", "a.txt"]
 
     e = await user_store.new_egress(egress_store, username, requested_files)
     metadata = e.metadata()
@@ -85,7 +88,7 @@ async def test_new_egress(tmp_stores, patch_datetime_now):
                 "sha256sum": "75a11da44c802486bc6f65640aa48a730f0f684c5c07a42ba3cd1735eb3fb070",
             },
             {
-                "path": "@^'🦆/hello.txt",
+                "path": "@^'🦆/multi/level/hello.txt",
                 "sha256sum": "5891b5b522d5df086d0ff0b110fbd9d21bb4fc7163af34d08286a2e846f6be03",
             },
         ],
@@ -99,7 +102,9 @@ async def test_new_egress(tmp_stores, patch_datetime_now):
         f"{username}/20250123-123456-000000-{random_suffix}",
         f"{username}/20250123-123456-000000-{random_suffix}/files",
         f"{username}/20250123-123456-000000-{random_suffix}/files/@^'🦆",
-        f"{username}/20250123-123456-000000-{random_suffix}/files/@^'🦆/hello.txt",
+        f"{username}/20250123-123456-000000-{random_suffix}/files/@^'🦆/multi",
+        f"{username}/20250123-123456-000000-{random_suffix}/files/@^'🦆/multi/level",
+        f"{username}/20250123-123456-000000-{random_suffix}/files/@^'🦆/multi/level/hello.txt",
         f"{username}/20250123-123456-000000-{random_suffix}/files/a.txt",
         f"{username}/20250123-123456-000000-{random_suffix}/metadata.json",
     ]
