@@ -30,10 +30,10 @@ def tmp_stores(tmp_path):
     egress_path = tmp_path / "egress"
 
     username = "user-1"
-    d = user_path / username / "egress" / "@^'🦆"
+    d = user_path / username / "@^'🦆"
     d.mkdir(parents=True)
     (d / "hello.txt").write_text("hello\n")
-    (user_path / username / "egress" / "a.txt").write_text("\n\n")
+    (user_path / username / "a.txt").write_text("\n\n")
     return user_path, egress_path, username
 
 
@@ -52,7 +52,7 @@ async def test_list_egress_files(tmp_stores):
     )
     assert filelist == {}
     assert total_size == 0
-    assert user_egress_path == Path(user_path / "nonexistent-user" / "egress")
+    assert user_egress_path == Path(user_path / "nonexistent-user")
 
     filelist, total_size, user_egress_path = await store.list_egress_files(username)
     assert filelist == {
@@ -60,7 +60,7 @@ async def test_list_egress_files(tmp_stores):
         Path("a.txt"): ("a.txt", 2),
     }
     assert total_size == 8
-    assert user_egress_path == (user_path / username / "egress")
+    assert user_egress_path == (user_path / username)
 
 
 @pytest.mark.asyncio

@@ -12,9 +12,6 @@ c.JupyterHub.spawner_class = "simple"
 user_dir = Path(__file__).parent / "users"
 user_dir.mkdir(exist_ok=True)
 c.SimpleLocalProcessSpawner.home_dir_template = f"{user_dir}/{{username}}"
-c.SimpleLocalProcessSpawner.pre_spawn_hook = lambda spawner: (
-    user_dir / spawner.user.name / "egress"
-).mkdir(parents=True, exist_ok=True)
 
 c.Authenticator.admin_users = {"admin", "demo"}
 

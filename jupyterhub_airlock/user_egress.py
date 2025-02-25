@@ -12,8 +12,6 @@ from .filesystemio import (
 
 log = logging.getLogger(__name__)
 
-USER_EGRESS_DIR = "egress"
-
 
 def timestamped_id(prefix: str) -> str:
     return "{0}/{1}-{2:08d}".format(
@@ -37,7 +35,7 @@ class UserEgressStore:
             - url-escaped file path
             - size (bytes)
         """
-        user_egress_path = self.user_store / user / USER_EGRESS_DIR
+        user_egress_path = self.user_store / user
         log.debug(f"Listing files in: {user_egress_path}")
         filelist, total_size = await filelist_and_size_recursive(user_egress_path)
         return filelist, total_size, user_egress_path

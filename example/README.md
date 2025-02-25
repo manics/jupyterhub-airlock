@@ -23,7 +23,8 @@ The `admin` username is special as it is part of the `egress-admins` group and i
 ### 2. Login as a normal user
 
 Login to JupyterHub as e.g. `user-1` and start your server, you should be taken to JupyterLab.
-Create one or more files and optionally directories in your home `egress/` directory.
+Create one or more files and optionally directories to be egressed.
+In this example the user home filesystem is used as the egress source directory, but in practice this would be a separate filesystem.
 
 Now go to http://localhost:8000/services/airlock/
 You can also find that URL through the JupyterHub `Services` dropdown.
