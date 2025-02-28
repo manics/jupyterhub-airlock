@@ -4,7 +4,13 @@ from pathlib import Path
 from random import randint
 from typing import Iterable
 
-from .egress import EGRESS_FILE_DIR, Egress, EgressStatus, EgressStore
+from .egress import (
+    EGRESS_FILE_DIR,
+    Egress,
+    EgressStatus,
+    EgressStore,
+    is_valid_egress_component,
+)
 from .filesystemio import (
     copyfiles,
     filelist_and_size_recursive,
@@ -24,7 +30,7 @@ class UserEgressStore:
         self.user_store: Path = user_store.absolute()
 
     async def list_egress_files(
-        self, user: str
+        self, group: str, user: str
     ) -> tuple[dict[Path, tuple[str, int]], int, Path]:
         """
         List all files in the egress directory for a given user
@@ -35,15 +41,23 @@ class UserEgressStore:
             - url-escaped file path
             - size (bytes)
         """
-        user_egress_path = self.user_store / user
+        is_valid_egress_component(group)
+        is_valid_egress_component(user)
+        user_egress_path = self.user_store / group / user
         log.debug(f"Listing files in: {user_egress_path}")
         filelist, total_size = await filelist_and_size_recursive(user_egress_path)
         return filelist, total_size, user_egress_path
 
     async def new_egress(
-        self, egress_store: EgressStore, user: str, requested_files: Iterable[str]
+        self,
+        egress_store: EgressStore,
+        group: str,
+        user: str,
+        requested_files: Iterable[str],
     ) -> Egress:
-        filelist, _, user_egress_path = await self.list_egress_files(user)
+        is_valid_egress_component(group)
+        is_valid_egress_component(user)
+        filelist, _, user_egress_path = await self.list_egress_files(group, user)
         allowed_file_paths = filelist.keys()
 
         # The requested_files should be a subset of filelist
@@ -62,7 +76,7 @@ class UserEgressStore:
 
         log.debug(f"{requested_file_paths=}")
 
-        egress_id = timestamped_id(user)
+        egress_id = timestamped_id(f"{group}/{user}")
         egress = egress_store.new_egress(egress_id)
         egress_dest_path = egress.path / EGRESS_FILE_DIR
 

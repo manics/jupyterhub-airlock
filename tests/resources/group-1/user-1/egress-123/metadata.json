@@ -1,5 +1,5 @@
 {
-  "id": "user-1/egress-123",
+  "id": "group-1/user-1/egress-123",
   "status": "pending",
   "files": [
     {

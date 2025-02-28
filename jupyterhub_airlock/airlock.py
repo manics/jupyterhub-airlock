@@ -26,7 +26,7 @@ from tornado.web import (
 )
 
 from ._version import version
-from .egress import EGRESS_FILE_DIR, Egress, EgressStatus, EgressStore
+from .egress import EGRESS_FILE_DIR, Egress, EgressList, EgressStatus, EgressStore
 from .filesystemio import (
     create_egress_zipfile,
     delete_egress_zipfile,
@@ -88,25 +88,28 @@ class AirlockHandler(HubOAuthenticated, RequestHandler):  # type: ignore[misc]
 
     def is_viewer(self, egress: Egress) -> bool:
         user = self.get_current_user()["name"]
+        groups = self.get_current_user()["groups"]
         # TODO: Get user from metadata.json, not filepath
-        u, _ = egress.id.split("/")
-        viewer = self.is_admin() or (user == u)
-        log.debug(f"is_viewer {user} {egress.id}: {viewer}")
+        g, u, _ = egress.id.split("/")
+        viewer = self.is_admin() or (g in groups and user == u)
+        log.debug(f"is_viewer {groups} {user} {egress.id}: {viewer}")
         return viewer
 
     def is_reviewer(self, egress: Egress) -> bool:
         user = self.get_current_user()["name"]
+        groups = self.get_current_user()["groups"]
         reviewer = self.is_admin() and egress.status() == EgressStatus.PENDING
-        log.debug(f"is_reviewer {user} {egress.id}: {reviewer}")
+        log.debug(f"is_reviewer {groups} {user} {egress.id}: {reviewer}")
         return reviewer
 
     def is_downloader(self, egress: Egress) -> bool:
         user = self.get_current_user()["name"]
-        u, _ = egress.id.split("/")
+        groups = self.get_current_user()["groups"]
+        g, u, _ = egress.id.split("/")
         downloader = (
-            self.is_admin() or (user == u)
+            self.is_admin() or (g in groups and user == u)
         ) and egress.status() == EgressStatus.ACCEPTED
-        log.debug(f"is_downloader {user} {egress.id}: {downloader}")
+        log.debug(f"is_downloader {groups} {user} {egress.id}: {downloader}")
         return downloader
 
     @addslash
@@ -130,7 +133,22 @@ class AirlockHandler(HubOAuthenticated, RequestHandler):  # type: ignore[misc]
         groups = current_user_model["groups"]
         is_admin = self.admin_group in groups
 
-        egress_list = self.store.list("*" if is_admin else username)
+        egress_list: EgressList = {}
+        if is_admin:
+            egress_list = self.store.list("*", "*")
+        else:
+            for group in groups:
+                es = self.store.list(group, username)
+                for status, egresses in es.items():
+                    if status not in egress_list:
+                        egress_list[status] = {}
+                    overlap = set(egress_list[status].keys()).intersection(
+                        egresses.keys()
+                    )
+                    if overlap:
+                        raise RuntimeError(f"Duplicate egress ids found: {overlap}")
+                    egress_list[status].update(egresses)
+
         self.render(
             "index.html",
             pending_list=sorted(
@@ -168,14 +186,19 @@ class AirlockHandler(HubOAuthenticated, RequestHandler):  # type: ignore[misc]
 class AirlockSubmissionHandler(AirlockHandler):
     @addslash
     @authenticated
-    async def get(self) -> None:
+    async def get(self, group: str, user: str) -> None:
         current_user_model = self.get_current_user()
         log.debug(f"{current_user_model=}")
         if not current_user_model:
             raise HTTPError(403, reason="Missing user")
         username = current_user_model["name"]
+        groups = current_user_model["groups"]
+        if group not in groups or user != username:
+            raise HTTPError(404, reason="Egress not found")
 
-        filelist, total_size, _ = await self.user_store.list_egress_files(username)
+        filelist, total_size, _ = await self.user_store.list_egress_files(
+            group, username
+        )
         total_size_mb = total_size / 1024 / 1024
         if total_size_mb > MAX_DIRECTORY_SIZE_MB:
             raise HTTPError(
@@ -190,12 +213,15 @@ class AirlockSubmissionHandler(AirlockHandler):
         )
 
     @authenticated
-    async def post(self) -> None:
+    async def post(self, group: str, user: str) -> None:
         current_user_model = self.get_current_user()
         log.debug(f"{current_user_model=}")
         if not current_user_model:
             raise HTTPError(403, reason="Missing user")
         username = current_user_model["name"]
+        groups = current_user_model["groups"]
+        if group not in groups or user != username:
+            raise HTTPError(404, reason="Egress not found")
 
         log.debug(f"{self.request.arguments=}")
 
@@ -215,7 +241,7 @@ class AirlockSubmissionHandler(AirlockHandler):
 
         try:
             egress = await self.user_store.new_egress(
-                self.store, username, requested_files
+                self.store, group, username, requested_files
             )
         except ValueError as e:
             raise HTTPError(400, reason=e.args[0]) from e
@@ -224,13 +250,12 @@ class AirlockSubmissionHandler(AirlockHandler):
 
 
 class AirlockEgressHandler(AirlockHandler):
-    async def _egress_info(self, user: str, egress: str) -> None:
+    async def _egress_info(self, group: str, user: str, egress: str) -> None:
         current_user_model = self.get_current_user()
         log.debug(f"{current_user_model=}")
         if not current_user_model:
             raise HTTPError(403, reason="Missing user")
-        username = current_user_model["name"]
-        egress_id = f"{user}/{egress}"
+        egress_id = f"{group}/{user}/{egress}"
 
         try:
             egress_item = self.store.get_egress(egress_id)
@@ -240,9 +265,10 @@ class AirlockEgressHandler(AirlockHandler):
             log.error(str(e))
             raise HTTPError(404, reason="Egress not found")
 
+        is_viewer = self.is_viewer(egress_item)
         is_reviewer = self.is_reviewer(egress_item)
         is_downloader = self.is_downloader(egress_item)
-        if self.is_admin() or username == user or is_reviewer:
+        if self.is_admin() or is_viewer or is_reviewer:
             self.render(
                 "egress.html",
                 egress=egress_item.metadata(),
@@ -255,17 +281,17 @@ class AirlockEgressHandler(AirlockHandler):
 
     @addslash
     @authenticated
-    async def get(self, user: str, egress: str) -> None:
-        await self._egress_info(user, egress)
+    async def get(self, group: str, user: str, egress: str) -> None:
+        await self._egress_info(group, user, egress)
 
     @authenticated
-    async def post(self, user: str, egress: str) -> None:
+    async def post(self, group: str, user: str, egress: str) -> None:
         current_user_model = self.get_current_user()
         log.debug(f"{current_user_model=}")
         if not current_user_model:
             raise HTTPError(403, reason="Missing user")
 
-        egress_id = f"{user}/{egress}"
+        egress_id = f"{group}/{user}/{egress}"
         egress_item = self.store.get_egress(egress_id)
         is_reviewer = self.is_reviewer(egress_item)
 
@@ -283,7 +309,7 @@ class AirlockEgressHandler(AirlockHandler):
             log.error(f"Invalid accept value: {accept}")
             raise HTTPError(422, "Invalid accept action")
 
-        await self._egress_info(user, egress)
+        await self._egress_info(group, user, egress)
 
 
 class AirlockDownloadHandler(AirlockHandler):
@@ -311,13 +337,13 @@ class AirlockDownloadHandler(AirlockHandler):
                     await asyncio.sleep(0.001)
 
     @authenticated
-    async def post(self, user: str, egress: str) -> None:
+    async def post(self, group: str, user: str, egress: str) -> None:
         current_user_model = self.get_current_user()
         log.debug(f"{current_user_model=}")
         if not current_user_model:
             raise HTTPError(403, reason="Missing user")
 
-        egress_id = f"{user}/{egress}"
+        egress_id = f"{group}/{user}/{egress}"
         egress_item = self.store.get_egress(egress_id)
         is_downloader = self.is_downloader(egress_item)
 
@@ -367,17 +393,17 @@ def airlock(filestore: str, user_store: str, admin_group: str, debug: bool) -> N
             rule("oauth_callback", HubOAuthCallbackHandler),
             # TODO: Enforce naming restrictions on user and server names in JupyterHub
             rule(
-                r"egress/(?P<user>[^/]+)/(?P<egress>[^/]+)/?",
+                r"egress/(?P<group>[^/]+)/(?P<user>[^/]+)/(?P<egress>[^/]+)/?",
                 AirlockEgressHandler,
                 airlockArgs,
             ),
             rule(
-                r"egress/(?P<user>[^/]+)/(?P<egress>[^/]+)/download",
+                r"egress/(?P<group>[^/]+)/(?P<user>[^/]+)/(?P<egress>[^/]+)/download",
                 AirlockDownloadHandler,
                 airlockArgs,
             ),
             rule(
-                r"new/?",
+                r"new/(?P<group>[^/]+)/(?P<user>[^/]+)/?",
                 AirlockSubmissionHandler,
                 airlockArgs,
             ),

@@ -95,6 +95,5 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           push: ${{ env.PUSH }}
-          # Caching fails if we include the .git directory in the image 🙁
           cache-from: type=gha
           cache-to: type=gha,mode=max

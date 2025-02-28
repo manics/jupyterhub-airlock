@@ -9,7 +9,7 @@ JsonT: TypeAlias = Any
 
 EGRESS_FILE_DIR = "files"
 EGRESS_COMPONENT_PATTERN = r"^[A-Za-z0-9][A-Za-z0-9-]+$"
-EGRESS_ID_PATTERN = r"^[A-Za-z0-9][A-Za-z0-9-]+/[A-Za-z0-9][A-Za-z0-9-]+$"
+EGRESS_ID_PATTERN = r"^(?P<group>[A-Za-z0-9][A-Za-z0-9-]+)/(?P<user>[A-Za-z0-9][A-Za-z0-9-]+)/(?P<egress>[A-Za-z0-9][A-Za-z0-9-]+)$"
 
 
 class EgressStatus(Enum):
@@ -173,15 +173,15 @@ class EgressStore:
     def __init__(self, filestore: Path):
         self.filestore: Path = filestore.absolute()
 
-    def _list_filestore(self, user: str) -> EgressList:
+    def _list_filestore(self, group: str, user: str) -> EgressList:
         """
-        Get all egress in a filestore, optionally filtered by user
+        Get all egress in a filestore, optionally filtered by group and/or user
 
         TODO: Need a database, loading all egress metadata files repeatedly
         on basically every request is obviously inefficient
         """
         egresses: EgressList = {}
-        for f in self.filestore.glob(f"{user}/*/"):
+        for f in self.filestore.glob(f"{group}/{user}/*/"):
             id = str(f.relative_to(self.filestore))
             if is_valid_egress_id(id):
                 egress = Egress(id, f)
@@ -192,13 +192,15 @@ class EgressStore:
                 egresses[status] = {id: egress}
         return egresses
 
-    def list(self, user: str) -> EgressList:
+    def list(self, group: str, user: str) -> EgressList:
         """
         List all egresses
         """
+        if group != "*":
+            is_valid_egress_component(group)
         if user != "*":
             is_valid_egress_component(user)
-        return self._list_filestore(user)
+        return self._list_filestore(group, user)
 
     def get_egress(self, egress_id: str) -> Egress:
         """
@@ -214,7 +216,7 @@ class EgressStore:
         """
         Create a new empty egress
         """
-        u_id, e_id = egress_id.split("/")
-        path = self.filestore / u_id / e_id
+        g_id, u_id, e_id = egress_id.split("/")
+        path = self.filestore / g_id / u_id / e_id
         egress = Egress(egress_id, path, create=True)
         return egress
