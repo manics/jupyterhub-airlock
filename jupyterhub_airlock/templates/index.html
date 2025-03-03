@@ -6,9 +6,10 @@
 
 {% include _info.html %}
 
+<h2>New egress</h2>
 <form method="get" action="{{baseurl}}new/">
   {% for group in groups %}
-  <label>
+  <label class="section">
     <input type="radio" name="group" value="{{group}}" required/>
     {{group}}
   </label>

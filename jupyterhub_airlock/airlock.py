@@ -6,6 +6,7 @@ import asyncio
 import json
 import logging
 import os
+from datetime import datetime
 from http.client import responses
 from pathlib import Path
 from typing import Any
@@ -19,6 +20,7 @@ from tornado.iostream import StreamClosedError
 from tornado.web import (
     Application,
     HTTPError,
+    RedirectHandler,
     RequestHandler,
     addslash,
     authenticated,
@@ -39,6 +41,15 @@ log = logging.getLogger(__name__)
 MAX_DIRECTORY_SIZE_MB = 100
 
 # JUPYTERHUB_API_TOKEN = os.environ["JUPYTERHUB_API_TOKEN"]
+
+
+class AirlockException(HTTPError):
+    def __init__(
+        self, status: int, *args: Any, message: str | None = None, **kwargs: Any
+    ):
+        self.timestamp = datetime.now().isoformat()
+        self.message = message
+        super().__init__(*args, **kwargs)
 
 
 class AirlockHandler(HubOAuthenticated, RequestHandler):  # type: ignore[misc]
@@ -118,7 +129,7 @@ class AirlockHandler(HubOAuthenticated, RequestHandler):  # type: ignore[misc]
         current_user_model = self.get_current_user()
         log.debug(f"{current_user_model=}")
         if not current_user_model:
-            raise HTTPError(403, reason="Missing user")
+            raise AirlockException(403, message="Missing user")
 
         # token = JUPYTERHUB_API_TOKEN
         # http_client = AsyncHTTPClient()
@@ -127,7 +138,7 @@ class AirlockHandler(HubOAuthenticated, RequestHandler):  # type: ignore[misc]
         #     headers={"Authorization": f"Bearer {token}"},
         # )
         # if response.error:
-        #     raise HTTPError(500, reason="Failed to get user info")
+        #     raise AirlockException(500, message="Failed to get user info")
 
         username = current_user_model["name"]
         groups = current_user_model["groups"]
@@ -170,16 +181,22 @@ class AirlockHandler(HubOAuthenticated, RequestHandler):  # type: ignore[misc]
         exc_info = kwargs.get("exc_info")
         reason = responses.get(status_code, "Unknown HTTP Error")
         message = ""
+        timestamp = ""
         if exc_info:
             exception = exc_info[1]
             r = getattr(exception, "reason", "")
             if r:
                 reason = r
             message = getattr(exception, "message", "")
+            timestamp = getattr(exception, "timestamp", "")
 
         self.set_status(status_code, reason)
         self.render(
-            "error.html", status_code=status_code, reason=reason, message=message
+            "error.html",
+            status_code=status_code,
+            reason=reason,
+            message=message,
+            timestamp=timestamp,
         )
 
 
@@ -193,10 +210,10 @@ class AirlockSubmissionHandler(AirlockHandler):
         req_group = self.request.arguments.get("group")
         if not req_group or len(req_group) != 1:
             log.error(f"Expected one group: {req_group}")
-            raise HTTPError(422, "Expected one group")
+            raise AirlockException(422, message="Expected one group")
         group = req_group[0].decode()
         if group not in groups:
-            raise HTTPError(404, reason="Egress not found")
+            raise AirlockException(404, message="Egress not found")
         return group
 
     @addslash
@@ -205,14 +222,14 @@ class AirlockSubmissionHandler(AirlockHandler):
         current_user_model = self.get_current_user()
         log.debug(f"{current_user_model=}")
         if not current_user_model:
-            raise HTTPError(403, reason="Missing user")
+            raise AirlockException(403, message="Missing user")
         username = current_user_model["name"]
         groups = current_user_model["groups"]
 
         new_button = self.request.arguments.get("new")
         if new_button != [b"new"]:
             log.error(f"Invalid new value: {new_button}")
-            raise HTTPError(422, "Invalid new action")
+            raise AirlockException(422, message="Invalid new action")
 
         group = self._request_arg_group()
 
@@ -221,9 +238,9 @@ class AirlockSubmissionHandler(AirlockHandler):
         )
         total_size_mb = total_size / 1024 / 1024
         if total_size_mb > MAX_DIRECTORY_SIZE_MB:
-            raise HTTPError(
+            raise AirlockException(
                 409,
-                reason=f"Directory size {total_size_mb:.0f} MB exceeds maximum {MAX_DIRECTORY_SIZE_MB} MB",
+                message=f"Directory size {total_size_mb:.0f} MB exceeds maximum {MAX_DIRECTORY_SIZE_MB} MB",
             )
 
         self.render(
@@ -238,7 +255,7 @@ class AirlockSubmissionHandler(AirlockHandler):
         current_user_model = self.get_current_user()
         log.debug(f"{current_user_model=}")
         if not current_user_model:
-            raise HTTPError(403, reason="Missing user")
+            raise AirlockException(403, message="Missing user")
         username = current_user_model["name"]
         groups = current_user_model["groups"]
 
@@ -248,14 +265,14 @@ class AirlockSubmissionHandler(AirlockHandler):
         request_arg_egress = self.request.arguments.get("egress")
         if request_arg_egress != [b"egress"]:
             log.error(f"Unexpected value for argument egress: {request_arg_egress}")
-            raise HTTPError(400, reason="Unexpected form value")
+            raise AirlockException(400, message="Unexpected form value")
 
         requested_files = set()
         for arg, value in self.request.arguments.items():
             if arg.startswith("file-"):
                 if value != [b"on"]:
                     log.error(f"Unexpected value for argument {arg}: {value}")
-                    raise HTTPError(400, reason="Unexpected form value")
+                    raise AirlockException(400, message="Unexpected form value")
                 filepath = unescape_filepath(arg[5:])
                 requested_files.add(filepath)
 
@@ -264,7 +281,8 @@ class AirlockSubmissionHandler(AirlockHandler):
                 self.store, group, username, requested_files
             )
         except ValueError as e:
-            raise HTTPError(400, reason=e.args[0]) from e
+            log.error(f"Failed to create new egress: {e}")
+            raise AirlockException(400, message="Failed to create new egress") from e
 
         self.redirect(f"{self.baseurl}egress/{egress.id}")
 
@@ -274,7 +292,7 @@ class AirlockEgressHandler(AirlockHandler):
         current_user_model = self.get_current_user()
         log.debug(f"{current_user_model=}")
         if not current_user_model:
-            raise HTTPError(403, reason="Missing user")
+            raise AirlockException(403, message="Missing user")
         egress_id = f"{group}/{user}/{egress}"
 
         try:
@@ -283,7 +301,7 @@ class AirlockEgressHandler(AirlockHandler):
             # Some browser plugins make random requests like for installHook.js.map
             # So handle gracefully instead of filling up our logs with exceptions
             log.error(str(e))
-            raise HTTPError(404, reason="Egress not found")
+            raise AirlockException(404, message="Egress not found")
 
         is_viewer = self.is_viewer(egress_item)
         is_reviewer = self.is_reviewer(egress_item)
@@ -297,7 +315,7 @@ class AirlockEgressHandler(AirlockHandler):
                 xsrf_token=self.xsrf_token.decode("ascii"),
             )
         else:
-            raise HTTPError(404, reason="Egress not found")
+            raise AirlockException(404, message="Egress not found")
 
     @addslash
     @authenticated
@@ -309,14 +327,14 @@ class AirlockEgressHandler(AirlockHandler):
         current_user_model = self.get_current_user()
         log.debug(f"{current_user_model=}")
         if not current_user_model:
-            raise HTTPError(403, reason="Missing user")
+            raise AirlockException(403, message="Missing user")
 
         egress_id = f"{group}/{user}/{egress}"
         egress_item = self.store.get_egress(egress_id)
         is_reviewer = self.is_reviewer(egress_item)
 
         if not is_reviewer:
-            raise HTTPError(404, reason="Egress not found")
+            raise AirlockException(404, message="Egress not found")
 
         log.debug(f"{self.request.arguments=}")
 
@@ -327,7 +345,7 @@ class AirlockEgressHandler(AirlockHandler):
             egress_item.set_status(EgressStatus.REJECTED)
         else:
             log.error(f"Invalid accept value: {accept}")
-            raise HTTPError(422, "Invalid accept action")
+            raise AirlockException(422, message="Invalid accept action")
 
         await self._egress_info(group, user, egress)
 
@@ -361,21 +379,21 @@ class AirlockDownloadHandler(AirlockHandler):
         current_user_model = self.get_current_user()
         log.debug(f"{current_user_model=}")
         if not current_user_model:
-            raise HTTPError(403, reason="Missing user")
+            raise AirlockException(403, message="Missing user")
 
         egress_id = f"{group}/{user}/{egress}"
         egress_item = self.store.get_egress(egress_id)
         is_downloader = self.is_downloader(egress_item)
 
         if not is_downloader:
-            raise HTTPError(404, reason="Egress not found")
+            raise AirlockException(404, message="Egress not found")
 
         log.debug(f"{self.request.arguments=}")
 
         download = self.request.arguments.get("download")
         if download != [b"download"]:
             log.error(f"Invalid download value: {download}")
-            raise HTTPError(422, "Invalid download action")
+            raise AirlockException(422, message="Invalid download action")
 
         filepath = await create_egress_zipfile(egress_item)
         log.info(f"Downloading {filepath}")
@@ -409,7 +427,8 @@ def airlock(filestore: str, user_store: str, admin_group: str, debug: bool) -> N
     # https://www.tornadoweb.org/en/stable/web.html#tornado.web.URLSpec
     app = Application(
         [
-            rule(r"/?", AirlockHandler, airlockArgs, name="home"),
+            rule(r"/", AirlockHandler, airlockArgs, name="home"),
+            rule(r"", RedirectHandler, {"url": JUPYTERHUB_SERVICE_PREFIX}),
             rule("oauth_callback", HubOAuthCallbackHandler),
             # TODO: Enforce naming restrictions on user and server names in JupyterHub
             rule(

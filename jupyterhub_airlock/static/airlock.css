@@ -5,6 +5,14 @@ body {
 dt {
   font-weight: bold;
 }
+
+form label.section {
+  display: block;
+}
+form button {
+  margin: 1vh;
+}
+
 table.egress-file-list tr td {
   font-family: monospace;
   padding: 0 1vw;

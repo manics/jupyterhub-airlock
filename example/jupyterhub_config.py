@@ -71,7 +71,7 @@ class GroupProfileSpawner(SimpleLocalProcessSpawner):
 
         username = self.user.name
 
-        if profile == "egress-admin":
+        if profile == "egress-admins":
             self.home_dir = f"{USER_DIR}"
         else:
             self.home_dir = f"{USER_DIR}/{profile}/{username}"
