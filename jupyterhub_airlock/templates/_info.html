@@ -7,7 +7,9 @@
   <dt>User</dt>
   <dd>{{username}}</dd>
   <dt>Groups</dt>
-  <dd>{{groups}}</dd>
+  {% for group in groups %}
+  <dd>{{group}}</dd>
+  {% end %}
   {% if is_admin %}
   <dt>Admin</dt>
   <dd>{{is_admin}}</dd>

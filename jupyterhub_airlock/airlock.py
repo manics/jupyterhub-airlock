@@ -184,17 +184,37 @@ class AirlockHandler(HubOAuthenticated, RequestHandler):  # type: ignore[misc]
 
 
 class AirlockSubmissionHandler(AirlockHandler):
+    def _request_arg_group(self) -> str:
+        """
+        Get the value of the group form field
+        Check the user is a member of the group
+        """
+        groups = self.get_current_user()["groups"]
+        req_group = self.request.arguments.get("group")
+        if not req_group or len(req_group) != 1:
+            log.error(f"Expected one group: {req_group}")
+            raise HTTPError(422, "Expected one group")
+        group = req_group[0].decode()
+        if group not in groups:
+            raise HTTPError(404, reason="Egress not found")
+        return group
+
     @addslash
     @authenticated
-    async def get(self, group: str, user: str) -> None:
+    async def get(self) -> None:
         current_user_model = self.get_current_user()
         log.debug(f"{current_user_model=}")
         if not current_user_model:
             raise HTTPError(403, reason="Missing user")
         username = current_user_model["name"]
         groups = current_user_model["groups"]
-        if group not in groups or user != username:
-            raise HTTPError(404, reason="Egress not found")
+
+        new_button = self.request.arguments.get("new")
+        if new_button != [b"new"]:
+            log.error(f"Invalid new value: {new_button}")
+            raise HTTPError(422, "Invalid new action")
+
+        group = self._request_arg_group()
 
         filelist, total_size, _ = await self.user_store.list_egress_files(
             group, username
@@ -210,21 +230,21 @@ class AirlockSubmissionHandler(AirlockHandler):
             "new.html",
             filelist=filelist,
             xsrf_token=self.xsrf_token.decode("ascii"),
+            group=group,
         )
 
     @authenticated
-    async def post(self, group: str, user: str) -> None:
+    async def post(self) -> None:
         current_user_model = self.get_current_user()
         log.debug(f"{current_user_model=}")
         if not current_user_model:
             raise HTTPError(403, reason="Missing user")
         username = current_user_model["name"]
         groups = current_user_model["groups"]
-        if group not in groups or user != username:
-            raise HTTPError(404, reason="Egress not found")
 
         log.debug(f"{self.request.arguments=}")
 
+        group = self._request_arg_group()
         request_arg_egress = self.request.arguments.get("egress")
         if request_arg_egress != [b"egress"]:
             log.error(f"Unexpected value for argument egress: {request_arg_egress}")
@@ -403,7 +423,7 @@ def airlock(filestore: str, user_store: str, admin_group: str, debug: bool) -> N
                 airlockArgs,
             ),
             rule(
-                r"new/(?P<group>[^/]+)/(?P<user>[^/]+)/?",
+                r"new/?",
                 AirlockSubmissionHandler,
                 airlockArgs,
             ),
