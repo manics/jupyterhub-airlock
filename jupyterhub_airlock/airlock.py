@@ -55,15 +55,19 @@ class AirlockException(HTTPError):
 class AirlockHandler(HubOAuthenticated, RequestHandler):  # type: ignore[misc]
     def initialize(self, **kwargs: Any) -> None:
         self.baseurl: str = kwargs.pop("baseurl")
+        self.jupyterhub_home: str = kwargs.pop("jupyterhub_home")
+
         self.store: EgressStore = kwargs.pop("store")
         self.user_store: UserEgressStore = kwargs.pop("user_store")
         if not self.store:
             raise ValueError("store required")
         if not self.user_store:
             raise ValueError("user_store required")
+
         self.admin_group = kwargs.pop("admin_group")
         if not self.admin_group:
             raise ValueError("admin_group required")
+
         super().initialize(**kwargs)
 
     def get_template_path(self) -> str:
@@ -76,6 +80,8 @@ class AirlockHandler(HubOAuthenticated, RequestHandler):  # type: ignore[misc]
         ns = super().get_template_namespace()
         ns["baseurl"] = self.baseurl
         ns["version"] = version
+        ns["jupyterhub_home"] = self.jupyterhub_home
+
         user = self.get_current_user()
         if user:
             ns["username"] = user.get("name")
@@ -413,11 +419,20 @@ def airlock(filestore: str, user_store: str, admin_group: str, debug: bool) -> N
     if not JUPYTERHUB_SERVICE_PREFIX.endswith("/"):
         JUPYTERHUB_SERVICE_PREFIX += "/"
 
+    # https://jupyterhub.readthedocs.io/en/5.2.1/reference/services.html#launching-a-hub-managed-service
+    jupyterhub_url = os.getenv(
+        "JUPYTERHUB_PUBLIC_HUB_URL", os.getenv("JUPYTERHUB_BASE_URL")
+    )
+    if not jupyterhub_url:
+        jupyterhub_url = "/"
+
     airlockArgs: dict[str, Any] = {}
     airlockArgs["store"] = EgressStore(Path(filestore))
     airlockArgs["admin_group"] = admin_group
     airlockArgs["user_store"] = UserEgressStore(Path(user_store))
     airlockArgs["baseurl"] = JUPYTERHUB_SERVICE_PREFIX
+
+    airlockArgs["jupyterhub_home"] = url_path_join(jupyterhub_url, "/hub/home")
 
     def rule(p: str, handler: type[RequestHandler], *args: Any, **kwargs: Any) -> url:
         return url(
@@ -453,7 +468,6 @@ def airlock(filestore: str, user_store: str, admin_group: str, debug: bool) -> N
         cookie_secret=os.urandom(32),
         static_path=os.path.join(os.path.dirname(__file__), "static"),
         debug=debug,
-        baseurl=JUPYTERHUB_SERVICE_PREFIX,
     )
 
     http_server = HTTPServer(app)

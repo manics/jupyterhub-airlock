@@ -1,6 +1,16 @@
 {% block baseinfo %}
 
-<a href="{{reverse_url('home')}}">Airlock Home</a>
+<div class="home-nav">
+  {% if jupyterhub_home %}
+  <div>
+    <a href="{{jupyterhub_home}}">JupyterHub Home</a>
+  </div>
+  {% end %}
+
+  <div>
+    <a href="{{reverse_url('home')}}">Airlock Home</a>
+  </div>
+</div>
 
 {% if username %}
 <dl>
