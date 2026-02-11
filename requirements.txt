@@ -18,11 +18,11 @@ certifi==2025.1.31
     # via requests
 certipy==0.2.1
     # via jupyterhub
-cffi==1.17.1
+cffi==2.0.0
     # via cryptography
 charset-normalizer==3.4.1
     # via requests
-cryptography==44.0.2
+cryptography==46.0.5
     # via certipy
 fqdn==1.5.1
     # via jsonschema
@@ -112,9 +112,10 @@ traitlets==5.14.3
     #   jupyterhub
 types-python-dateutil==2.9.0.20241206
     # via arrow
-typing-extensions==4.12.2
+typing-extensions==4.15.0
     # via
     #   alembic
+    #   cryptography
     #   pydantic
     #   pydantic-core
     #   referencing
